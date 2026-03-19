@@ -39,8 +39,14 @@ export const config: EnvironmentConfig = {
     url: getEnv('NEXT_PUBLIC_SUPABASE_URL'),
     anonKey: getEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY'),
   },
+  groq: {
+    apiKey: getEnv('GROQ_API_KEY'),
+  },
+  huggingface: {
+    apiKey: getEnv('HUGGINGFACE_API_KEY'),
+  },
   openrouter: {
-    apiKey: getEnv('OPENROUTER_API_KEY'),
+    apiKey: getEnv('OPENROUTER_API_KEY', '', false),
   },
   app: {
     env: (getEnv('NODE_ENV', 'development', false) as 'development' | 'production' | 'test'),
@@ -71,7 +77,8 @@ export function validateEnvironment(): void {
     const requiredKeys = [
       config.supabase.url,
       config.supabase.anonKey,
-      config.openrouter.apiKey,
+      config.groq.apiKey,
+      config.huggingface.apiKey,
     ];
 
     console.log('[Config] Environment variables validated successfully ✓');
@@ -86,6 +93,14 @@ export function validateEnvironment(): void {
  */
 export function getSupabaseConfig() {
   return config.supabase;
+}
+
+export function getGroqConfig() {
+  return config.groq;
+}
+
+export function getHuggingFaceConfig() {
+  return config.huggingface;
 }
 
 export function getOpenRouterConfig() {

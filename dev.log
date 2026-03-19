@@ -1,0 +1,67 @@
+
+> pmcopilot@0.1.0 dev
+> next dev
+
+ ⚠ Port 3000 is in use, trying 3001 instead.
+ ⚠ Port 3001 is in use, trying 3002 instead.
+  ▲ Next.js 14.2.35
+  - Local:        http://localhost:3002
+  - Environments: .env.local
+
+ ✓ Starting...
+ ✓ Ready in 3.4s
+ ○ Compiling /middleware ...
+ ✓ Compiled /middleware in 543ms (122 modules)
+ ○ Compiling /api/analyze ...
+ ✓ Compiled /api/analyze in 2s (238 modules)
+[Config] Environment variables validated successfully ✓
+[2026-03-18T21:41:36.359Z] [INFO] Supabase client initialized 
+[2026-03-18T21:41:36.402Z] [INFO] AnalysisEngineService initialized 
+[2026-03-18T21:41:36.421Z] [INFO] API Request: POST /api/analyze 
+[2026-03-18T21:41:36.425Z] [ERROR] Failed to get current user { error: 'Auth session missing!' }
+[2026-03-18T21:41:36.428Z] [INFO] Running analysis without authentication 
+[2026-03-18T21:41:36.428Z] [INFO] Starting comprehensive analysis {
+  feedbackLength: 69,
+  hasContext: true,
+  hasProjectId: false,
+  isAuthenticated: false,
+  detailLevel: 'comprehensive',
+  useEnhanced: false,
+  useComprehensive: true
+}
+[2026-03-18T21:41:36.429Z] [INFO] Starting Comprehensive Strategy Analysis {
+  analysisId: 'strategy-1773870096429-l302kj7',
+  feedbackLength: 69,
+  hasContext: true
+}
+[2026-03-18T21:41:36.430Z] [INFO] AI: Calling Groq API using groq { messageCount: 2, model: 'llama-3.1-70b-versatile' }
+(node:5620) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+[2026-03-18T21:41:37.882Z] [INFO] AI: Calling Groq API using groq { messageCount: 2, model: 'llama-3.1-70b-versatile' }
+[2026-03-18T21:41:38.005Z] [WARN] Groq main model failed, trying fast model { error: 'Request failed with status code 400' }
+[2026-03-18T21:41:38.006Z] [INFO] Attempting Groq FAST model fallback 
+[2026-03-18T21:41:38.006Z] [INFO] AI: Calling Groq API (FAST MODEL) using groq { messageCount: 2, model: 'llama-3.1-8b-instant' }
+[2026-03-18T21:41:47.942Z] [INFO] AI: Groq API call successful using groq { tokens: 10263, model: 'llama-3.1-8b-instant' }
+[2026-03-18T21:41:47.943Z] [WARN] Fewer than 10 features generated 
+[2026-03-18T21:41:47.943Z] [WARN] Fewer than 15 tasks generated 
+[2026-03-18T21:41:47.944Z] [INFO] Comprehensive Strategy Analysis Complete {
+  analysisId: 'strategy-1773870096429-l302kj7',
+  processingTime: 11515,
+  problemsCount: 4,
+  featuresCount: 3,
+  tasksCount: 3
+}
+[2026-03-18T21:41:47.944Z] [INFO] API Response: POST /api/analyze - 200 {
+  analysisId: 'strategy-1773870096429-l302kj7',
+  savedId: null,
+  problemsFound: 4,
+  featuresGenerated: 3,
+  tasksCreated: 3,
+  provider: 'groq-comprehensive',
+  processingTime: 11523
+}
+ POST /api/analyze 200 in 13826ms
+ ○ Compiling /_not-found ...
+ ✓ Compiled /_not-found in 11s (1620 modules)
+ POST /api/analyze 404 in 11309ms
+ ✓ Compiled in 352ms (710 modules)

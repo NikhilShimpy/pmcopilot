@@ -17,6 +17,13 @@ export const API_ROUTES = {
   FEEDBACK: '/api/feedback',
   FEEDBACK_BY_ID: (id: string) => `/api/feedback/${id}`,
   FEEDBACK_BY_PROJECT: (projectId: string) => `/api/feedback?project_id=${projectId}`,
+
+  // Integrations
+  INTEGRATIONS: {
+    GMAIL: '/api/integrations/gmail',
+    SLACK: '/api/integrations/slack',
+    WEBHOOK: '/api/webhook/feedback',
+  },
 } as const;
 
 // ============================================
@@ -44,15 +51,52 @@ export const AI_CONFIG = {
     BASE_URL: 'https://openrouter.ai/api/v1',
     CHAT_ENDPOINT: '/chat/completions',
     DEFAULT_MODEL: 'anthropic/claude-3.5-sonnet',
-    TIMEOUT: 30000, // 30 seconds
+    REASONING_MODEL: 'anthropic/claude-3.5-sonnet', // Strong reasoning model
+    FAST_MODEL: 'anthropic/claude-3-haiku', // Fast model for simple tasks
+    // Free models on OpenRouter (fallback when paid models fail)
+    FREE_MODEL: 'meta-llama/llama-3.2-3b-instruct:free',
+    TIMEOUT: 60000, // 60 seconds for complex analysis
+    STAGE_TIMEOUT: 45000, // Per-stage timeout
+  },
+  GROQ: {
+    BASE_URL: 'https://api.groq.com/openai/v1',
+    CHAT_ENDPOINT: '/chat/completions',
+    DEFAULT_MODEL: 'llama-3.1-70b-versatile', // Free and powerful
+    FAST_MODEL: 'llama-3.1-8b-instant', // Fast and free
+    TIMEOUT: 60000,
   },
   PUTER: {
     SCRIPT_URL: 'https://js.puter.com/v2/',
-    TIMEOUT: 30000,
+    TIMEOUT: 60000,
+    DEFAULT_MODEL: 'claude-sonnet-4-6', // Puter fallback model
   },
   MAX_RETRIES: 2,
   DEFAULT_TEMPERATURE: 0.7,
-  DEFAULT_MAX_TOKENS: 2000,
+  DEFAULT_MAX_TOKENS: 4096,
+  // Pipeline-specific configuration
+  PIPELINE: {
+    // Stage-specific settings
+    STAGES: {
+      cleaning: { temperature: 0.3, max_tokens: 2000, timeout: 20000 },
+      clustering: { temperature: 0.5, max_tokens: 3000, timeout: 30000 },
+      scoring: { temperature: 0.3, max_tokens: 2000, timeout: 20000 },
+      feature_generation: { temperature: 0.7, max_tokens: 4000, timeout: 40000 },
+      prd_generation: { temperature: 0.6, max_tokens: 4000, timeout: 45000 },
+      task_generation: { temperature: 0.5, max_tokens: 3000, timeout: 30000 },
+      impact_estimation: { temperature: 0.5, max_tokens: 2000, timeout: 25000 },
+    },
+    // Overall pipeline settings
+    TOTAL_TIMEOUT: 300000, // 5 minutes max for full pipeline
+    ENABLE_PARALLEL: false, // Sequential stages for dependency management
+    RETRY_PER_STAGE: 2,
+  },
+  // Severity keywords for scoring
+  SEVERITY_KEYWORDS: {
+    critical: ['crash', 'broken', 'unusable', 'data loss', 'security', 'urgent', 'critical', 'emergency', 'blocker'],
+    high: ['frustrating', 'annoying', 'hate', 'terrible', 'awful', 'worst', 'unacceptable', 'major'],
+    medium: ['difficult', 'confusing', 'slow', 'inconvenient', 'needs improvement', 'could be better'],
+    low: ['minor', 'small', 'would be nice', 'suggestion', 'idea', 'nice to have'],
+  },
 } as const;
 
 // ============================================
