@@ -64,7 +64,7 @@ export interface AIResponse {
   success: boolean;
   data?: AnalysisResult;
   error?: string;
-  provider?: 'openrouter' | 'puter';
+  provider?: 'groq' | 'groq-fast' | 'huggingface' | 'openrouter' | 'puter';
 }
 
 // ============================================
@@ -162,10 +162,22 @@ export interface EnvironmentConfig {
     url: string;
     anonKey: string;
   };
-  openrouter: {
+  groq: {
+    apiKey: string;
+  };
+  huggingface: {
+    apiKey: string;
+  };
+  openrouter?: {
     apiKey: string;
   };
   app: {
     env: 'development' | 'production' | 'test';
   };
 }
+
+// ============================================
+// RE-EXPORT COMPREHENSIVE ANALYSIS TYPES
+// ============================================
+
+export * from './analysis';

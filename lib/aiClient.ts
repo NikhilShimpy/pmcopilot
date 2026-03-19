@@ -50,6 +50,12 @@ async function callOpenRouter(
 ): Promise<AnalysisResult> {
   const url = `${AI_CONFIG.OPENROUTER.BASE_URL}${AI_CONFIG.OPENROUTER.CHAT_ENDPOINT}`;
 
+  // Check if OpenRouter is configured
+  const apiKey = config.openrouter?.apiKey || process.env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    throw new Error('OpenRouter API key not configured');
+  }
+
   logger.ai('Calling OpenRouter API', 'openrouter', {
     messageCount: messages.length,
   });
@@ -65,7 +71,7 @@ async function callOpenRouter(
       },
       {
         headers: {
-          Authorization: `Bearer ${config.openrouter.apiKey}`,
+          Authorization: `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
           'HTTP-Referer': 'https://pmcopilot.app',
           'X-Title': 'PMCopilot',
