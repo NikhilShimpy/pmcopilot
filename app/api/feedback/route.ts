@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { supabase, requireAuth } from '@/lib/supabaseClient';
+import { createServerSupabaseClient, requireServerAuth } from '@/lib/supabase/server';
 import { logger } from '@/lib/logger';
 import {
   handleError,
@@ -22,8 +22,9 @@ export async function GET(request: NextRequest) {
   try {
     logger.apiRequest('GET', '/api/feedback');
 
-    // Require authentication
-    const user = await requireAuth(supabase);
+    // Get server client and require auth
+    const supabase = await createServerSupabaseClient();
+    const user = await requireServerAuth();
 
     // Get query parameters
     const { searchParams } = new URL(request.url);
@@ -76,8 +77,9 @@ export async function POST(request: NextRequest) {
   try {
     logger.apiRequest('POST', '/api/feedback');
 
-    // Require authentication
-    const user = await requireAuth(supabase);
+    // Get server client and require auth
+    const supabase = await createServerSupabaseClient();
+    const user = await requireServerAuth();
 
     // Parse request body
     const body: CreateFeedbackRequest = await request.json();

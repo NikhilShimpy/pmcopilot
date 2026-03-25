@@ -95,9 +95,12 @@ export interface UserStory {
 
 export interface AcceptanceCriterion {
   id: string;
-  description: string;
-  priority: 'Must' | 'Should' | 'Could';
-  test_scenarios: string[];
+  description?: string;
+  priority?: 'Must' | 'Should' | 'Could';
+  test_scenarios?: string[];
+  requirement?: string;
+  criteria?: string;
+  testable?: boolean;
 }
 
 export interface RiskItem {
@@ -118,12 +121,14 @@ export interface ComprehensivePRD {
   goals_long_term: string[];
   non_goals: string[];
   feature_requirements: string[];
-  user_stories: UserStory[];
+  user_stories?: UserStory[];
   acceptance_criteria: AcceptanceCriterion[];
   success_metrics: string[];
-  risk_analysis: RiskItem[];
-  assumptions: string[];
-  compliance: string[];
+  risk_analysis?: RiskItem[];
+  risks?: string[];
+  assumptions?: string[];
+  compliance?: string[];
+  dependencies?: string[];
 }
 
 // ============================================
@@ -155,14 +160,25 @@ export interface DatabaseSchema {
 
 export interface StrategicSystemDesign {
   architecture_overview: string;
-  frontend_components: SystemComponent[];
-  backend_services: SystemComponent[];
-  database_design: DatabaseSchema[];
-  apis: APIEndpoint[];
-  ai_integration: string;
-  data_flow: string;
-  scalability_strategy: string;
-  security_considerations: string[];
+  frontend_components?: SystemComponent[];
+  backend_services?: SystemComponent[];
+  database_design?: DatabaseSchema[];
+  apis?: APIEndpoint[];
+  ai_integration?: string;
+  data_flow?: string;
+  scalability_strategy?: string;
+  security_considerations?: string[];
+  core_components?: any[];
+  data_models?: string;
+  api_design?: string;
+  scalability_plan?: string;
+  technology_stack?: {
+    frontend?: string[];
+    backend?: string[];
+    database?: string[];
+    infrastructure?: string[];
+    third_party?: string[];
+  };
 }
 
 // ============================================
@@ -186,18 +202,24 @@ export interface StrategicTask {
 // ============================================
 
 export interface RoadmapPhase {
-  phase_name: string;
-  features: string[];
-  goals: string[];
-  timeline: string;
-  success_criteria: string[];
+  phase_name?: string;
+  features?: string[];
+  goals?: string[];
+  timeline?: string;
+  success_criteria?: string[];
+  duration?: string;
+  key_features?: string[];
+  resources_needed?: string[];
 }
 
 export interface ExecutionRoadmap {
-  phase_1_mvp: RoadmapPhase;
-  phase_2_scale: RoadmapPhase;
-  phase_3_advanced: RoadmapPhase;
-  overall_timeline: string;
+  phase_1_mvp?: RoadmapPhase;
+  phase_2_scale?: RoadmapPhase;
+  phase_3_advanced?: RoadmapPhase;
+  phase_2_growth?: RoadmapPhase;
+  phase_3_scale?: RoadmapPhase;
+  overall_timeline?: string;
+  milestones?: any[];
 }
 
 // ============================================
@@ -213,19 +235,23 @@ export interface TeamRole {
 }
 
 export interface ManpowerPlan {
-  roles: TeamRole[];
-  total_headcount: number;
-  minimum_team: {
+  roles?: TeamRole[];
+  total_headcount?: number;
+  minimum_team?: {
     description: string;
     roles: TeamRole[];
     total: number;
   };
-  ideal_team: {
+  ideal_team?: {
     description: string;
     roles: TeamRole[];
     total: number;
   };
-  hiring_priority: string[];
+  hiring_priority?: string[];
+  team_composition?: any[];
+  hiring_plan?: string;
+  total_monthly_cost_inr?: number;
+  total_team_size?: number;
 }
 
 // ============================================
@@ -315,10 +341,16 @@ export interface ImpactAnalysis {
   user_impact_score: number; // 0-10
   business_impact: string;
   business_impact_score: number; // 0-10
-  revenue_potential: string;
-  scalability_potential: string;
+  revenue_potential?: string;
+  scalability_potential?: string;
   confidence_score: number; // 0-100
   time_to_value: string;
+  affected_user_percentage?: number;
+  revenue_impact?: string;
+  retention_impact?: string;
+  market_impact?: string;
+  competitive_advantage?: string;
+  long_term_vision?: string;
 }
 
 // ============================================
@@ -331,6 +363,7 @@ export interface AnalysisMetadata {
   processing_time_ms: number;
   model_used: string;
   input_length: number;
+  fallback_mode?: boolean;
 }
 
 // ============================================

@@ -30,7 +30,7 @@ import {
   Shield,
   Workflow,
 } from 'lucide-react'
-import type { ComprehensiveStrategyResult } from '@/types/comprehensive-strategy'
+import type { ComprehensiveStrategyResult, RoadmapPhase } from '@/types/comprehensive-strategy'
 
 interface ComprehensiveStrategyViewProps {
   result: ComprehensiveStrategyResult
@@ -983,8 +983,8 @@ export default function ComprehensiveStrategyView({
                   {/* Phases */}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     {['phase_1_mvp', 'phase_2_scale', 'phase_3_advanced'].map((phaseKey, idx) => {
-                      const phase = result.execution_roadmap[phaseKey as keyof typeof result.execution_roadmap]
-                      if (!phase || typeof phase === 'string') return null
+                      const phase = result.execution_roadmap[phaseKey as keyof typeof result.execution_roadmap] as RoadmapPhase | undefined
+                      if (!phase || typeof phase === 'string' || Array.isArray(phase)) return null
                       const colors = [
                         { bg: 'bg-blue-50', border: 'border-blue-200', badge: 'bg-blue-600' },
                         { bg: 'bg-purple-50', border: 'border-purple-200', badge: 'bg-purple-600' },

@@ -3,14 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
     "type-check": "tsc --noEmit",
     "setup": "node scripts/setup.js",
     "setup:wizard": "npm run dev & open http://localhost:3000/setup",
-    "verify": "curl http://localhost:3000/api/setup/verify"
+    "verify": "curl http://localhost:3000/api/setup/verify",
+    "clean": "rm -rf .next && rm -rf node_modules/.cache && echo 'Cache cleared successfully'",
+    "clean:all": "rm -rf .next && rm -rf node_modules && echo 'Full clean complete. Run npm install to reinstall dependencies'"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -21,13 +23,14 @@
     "axios": "^1.13.6",
     "framer-motion": "^12.38.0",
     "lucide-react": "^0.577.0",
-    "next": "^14.2.0",
+    "next": "^16.2.0",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "react-hook-form": "^7.71.2",
     "react-markdown": "^9.1.0",
     "recharts": "^3.8.0",
-    "zod": "^4.3.6"
+    "zod": "^4.3.6",
+    "zustand": "^5.0.12"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

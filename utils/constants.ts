@@ -46,50 +46,51 @@ export const HTTP_STATUS = {
 // AI CONFIGURATION
 // ============================================
 
+/**
+ * AI PROVIDER HIERARCHY:
+ * 1. PRIMARY: Google Gemini API
+ * 2. FALLBACK: Groq (ONLY if Gemini fails)
+ *
+ * REMOVED: Ollama, HuggingFace, OpenRouter, Puter
+ */
 export const AI_CONFIG = {
-  OPENROUTER: {
-    BASE_URL: 'https://openrouter.ai/api/v1',
-    CHAT_ENDPOINT: '/chat/completions',
-    DEFAULT_MODEL: 'anthropic/claude-3.5-sonnet',
-    REASONING_MODEL: 'anthropic/claude-3.5-sonnet', // Strong reasoning model
-    FAST_MODEL: 'anthropic/claude-3-haiku', // Fast model for simple tasks
-    // Free models on OpenRouter (fallback when paid models fail)
-    FREE_MODEL: 'meta-llama/llama-3.2-3b-instruct:free',
-    TIMEOUT: 60000, // 60 seconds for complex analysis
-    STAGE_TIMEOUT: 45000, // Per-stage timeout
+  // PRIMARY: Google Gemini API
+  GEMINI: {
+    BASE_URL: 'https://generativelanguage.googleapis.com/v1beta/models',
+    DEFAULT_MODEL: 'gemini-2.0-flash', // Latest fast model (2024)
+    PRO_MODEL: 'gemini-1.5-pro-latest', // Complex tasks
+    TIMEOUT: 60000, // 60 seconds
   },
+
+  // FALLBACK: Groq (only if Gemini fails)
   GROQ: {
     BASE_URL: 'https://api.groq.com/openai/v1',
     CHAT_ENDPOINT: '/chat/completions',
-    DEFAULT_MODEL: 'llama-3.1-70b-versatile', // Free and powerful
-    FAST_MODEL: 'llama-3.1-8b-instant', // Fast and free
-    TIMEOUT: 60000,
+    DEFAULT_MODEL: 'llama-3.3-70b-versatile', // Updated to latest stable model
+    FAST_MODEL: 'llama-3.1-8b-instant',
+    TIMEOUT: 90000,
   },
-  PUTER: {
-    SCRIPT_URL: 'https://js.puter.com/v2/',
-    TIMEOUT: 60000,
-    DEFAULT_MODEL: 'claude-sonnet-4-6', // Puter fallback model
-  },
+
   MAX_RETRIES: 2,
   DEFAULT_TEMPERATURE: 0.7,
-  DEFAULT_MAX_TOKENS: 4096,
+  DEFAULT_MAX_TOKENS: 8192,
+
   // Pipeline-specific configuration
   PIPELINE: {
-    // Stage-specific settings
     STAGES: {
       cleaning: { temperature: 0.3, max_tokens: 2000, timeout: 20000 },
       clustering: { temperature: 0.5, max_tokens: 3000, timeout: 30000 },
       scoring: { temperature: 0.3, max_tokens: 2000, timeout: 20000 },
-      feature_generation: { temperature: 0.7, max_tokens: 4000, timeout: 40000 },
-      prd_generation: { temperature: 0.6, max_tokens: 4000, timeout: 45000 },
-      task_generation: { temperature: 0.5, max_tokens: 3000, timeout: 30000 },
-      impact_estimation: { temperature: 0.5, max_tokens: 2000, timeout: 25000 },
+      feature_generation: { temperature: 0.7, max_tokens: 8000, timeout: 60000 },
+      prd_generation: { temperature: 0.6, max_tokens: 6000, timeout: 50000 },
+      task_generation: { temperature: 0.5, max_tokens: 8000, timeout: 60000 },
+      impact_estimation: { temperature: 0.5, max_tokens: 4000, timeout: 30000 },
     },
-    // Overall pipeline settings
-    TOTAL_TIMEOUT: 300000, // 5 minutes max for full pipeline
-    ENABLE_PARALLEL: false, // Sequential stages for dependency management
+    TOTAL_TIMEOUT: 300000, // 5 minutes max
+    ENABLE_PARALLEL: false,
     RETRY_PER_STAGE: 2,
   },
+
   // Severity keywords for scoring
   SEVERITY_KEYWORDS: {
     critical: ['crash', 'broken', 'unusable', 'data loss', 'security', 'urgent', 'critical', 'emergency', 'blocker'],
@@ -136,12 +137,10 @@ export const DB_SCHEMA = {
     CREATE TABLE IF NOT EXISTS analyses (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-      feedback_id UUID REFERENCES feedbacks(id) ON DELETE SET NULL,
       result JSONB NOT NULL,
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS idx_analyses_project_id ON analyses(project_id);
-    CREATE INDEX IF NOT EXISTS idx_analyses_feedback_id ON analyses(feedback_id);
   `,
 } as const;
 

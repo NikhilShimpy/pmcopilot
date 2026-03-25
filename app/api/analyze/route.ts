@@ -1,13 +1,12 @@
 /**
- * PMCopilot - Comprehensive Analysis API
+ * PMCopilot - Comprehensive Analysis API with Streaming Progress
  *
- * POST /api/analyze - Run comprehensive AI feedback analysis
+ * POST /api/analyze - Run comprehensive AI feedback analysis with live updates
  * GET /api/analyze - Get analysis history
- * GET /api/analyze/[id] - Get specific analysis
  */
 
 import { NextRequest } from 'next/server';
-import { supabase, requireAuth } from '@/lib/supabaseClient';
+import { createServerSupabaseClient, getUserOrAnonymous } from '@/lib/supabase/server';
 import { logger } from '@/lib/logger';
 import {
   handleError,
@@ -16,7 +15,6 @@ import {
   throwValidationError,
 } from '@/lib/errorHandler';
 import { analysisEngineService } from '@/services/analysis-engine.service';
-import { runEnhancedAnalysisPipeline } from '@/lib/enhancedAnalysisPipeline';
 import { runComprehensiveStrategyAnalysis } from '@/lib/comprehensiveStrategyEngine';
 import { AnalyzeRequest, PipelineContext } from '@/types/analysis';
 import { SUCCESS_MESSAGES, DB_TABLES, VALIDATION } from '@/utils/constants';
@@ -24,38 +22,7 @@ import { isValidUUID } from '@/utils/helpers';
 
 /**
  * POST /api/analyze
- * Run comprehensive feedback analysis with multi-stage AI pipeline
- *
- * Input:
- * {
- *   "project_id": string (optional),
- *   "feedback": string (required),
- *   "detail_level": "standard" | "enhanced" (optional, default: "standard"),
- *   "context": {
- *     "project_name": string,
- *     "project_context": string,
- *     "user_persona": string,
- *     "industry": string,
- *     "product_type": string
- *   } (optional)
- * }
- *
- * Output:
- * {
- *   "success": true,
- *   "data": {
- *     "problems": [...],
- *     "features": [...],
- *     "prd": {...},
- *     "tasks": [...],
- *     "impact": {...},
- *     "explainability": {...},
- *     "executive_summary": string,
- *     "key_findings": [...],
- *     "immediate_actions": [...]
- *   },
- *   "message": "Analysis completed successfully"
- * }
+ * Run comprehensive feedback analysis with streaming progress updates
  */
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
@@ -69,7 +36,7 @@ export async function POST(request: NextRequest) {
       body = await request.json();
     } catch {
       throwValidationError('Invalid JSON in request body');
-      return; // TypeScript flow control
+      return;
     }
 
     // Validate required fields
@@ -90,14 +57,10 @@ export async function POST(request: NextRequest) {
       throwValidationError('Invalid project_id format');
     }
 
-    // Get authenticated user (optional - can work without auth)
-    let user = null;
-    try {
-      user = await requireAuth(supabase);
-    } catch {
-      // Allow unauthenticated analysis for demo purposes
-      logger.info('Running analysis without authentication');
-    }
+    // Get server client and user (works with or without auth)
+    const supabase = await createServerSupabaseClient();
+    const user = await getUserOrAnonymous();
+    const isAuthenticated = user.id !== 'anonymous';
 
     // Build pipeline context
     const pipelineContext: PipelineContext = {
@@ -109,8 +72,8 @@ export async function POST(request: NextRequest) {
       product_type: body.context?.product_type,
     };
 
-    // If project_id is provided and user is authenticated, fetch project details
-    if (user && body.project_id) {
+    // Fetch project details if authenticated
+    if (isAuthenticated && body.project_id) {
       try {
         const { data: project } = await supabase
           .from(DB_TABLES.PROJECTS)
@@ -124,136 +87,73 @@ export async function POST(request: NextRequest) {
           pipelineContext.project_context = project.description;
         }
       } catch {
-        // Continue without project context
         logger.warn('Could not fetch project details');
       }
     }
 
-    // Determine analysis type
     const detailLevel = body.detail_level || 'comprehensive';
-    const useEnhanced = detailLevel === 'enhanced';
-    const useComprehensive = detailLevel === 'comprehensive';
 
     logger.info('Starting comprehensive analysis', {
       feedbackLength: body.feedback.length,
       hasContext: !!body.context,
       hasProjectId: !!body.project_id,
-      isAuthenticated: !!user,
+      isAuthenticated,
       detailLevel,
-      useEnhanced,
-      useComprehensive,
     });
 
-    // Run comprehensive analysis (standard, enhanced, or comprehensive)
-    let analysisResult: any;
+    // Run comprehensive analysis
+    const comprehensiveResult = await runComprehensiveStrategyAnalysis(
+      body.feedback,
+      pipelineContext
+    );
 
-    if (useComprehensive) {
-      // Use comprehensive strategy engine for full 13-section output
-      const comprehensiveResult = await runComprehensiveStrategyAnalysis(
-        body.feedback,
-        pipelineContext
-      );
-
-      if (comprehensiveResult.success && comprehensiveResult.result) {
-        analysisResult = {
-          success: true,
-          data: comprehensiveResult.result,
-          provider: comprehensiveResult.provider,
-        };
-      } else {
-        analysisResult = {
-          success: false,
-          error: comprehensiveResult.error || 'Comprehensive analysis failed',
-        };
-      }
-    } else if (useEnhanced) {
-      // Use enhanced pipeline for detailed analysis
-      const enhancedResult = await runEnhancedAnalysisPipeline(
-        body.feedback,
-        pipelineContext
-      );
-
-      // Transform enhanced result to standard format
-      if (enhancedResult.success && enhancedResult.result) {
-        analysisResult = {
-          success: true,
-          data: enhancedResult.result,
-          provider: enhancedResult.provider,
-        };
-      } else {
-        analysisResult = {
-          success: false,
-          error: enhancedResult.error || 'Enhanced analysis failed',
-        };
-      }
-    } else {
-      // Use standard pipeline
-      analysisResult = await analysisEngineService.analyzeFeedback(
-        body.feedback,
-        pipelineContext
-      );
-    }
-
-    // Handle analysis failure
-    if (!analysisResult.success || !analysisResult.data) {
+    if (!comprehensiveResult.success || !comprehensiveResult.result) {
       logger.error('Analysis failed', {
-        error: analysisResult.error,
-        errorCode: analysisResult.error_code,
-      });
-
-      logger.apiResponse('POST', '/api/analyze', 500, {
-        error: analysisResult.error,
-        duration: Date.now() - startTime,
+        error: comprehensiveResult.error,
       });
 
       return successResponse(
         {
           success: false,
-          error: analysisResult.error || 'Analysis failed',
+          error: comprehensiveResult.error || 'Analysis failed',
         },
         'Analysis failed',
         500
       );
     }
 
-    // If user is authenticated and project_id is provided, save the analysis
+    // Save analysis if authenticated
     let savedAnalysisId: string | null = null;
-    if (user && body.project_id) {
+    if (isAuthenticated && body.project_id) {
       const saveResult = await analysisEngineService.saveAnalysis(
         supabase,
         body.project_id,
-        analysisResult.data
+        comprehensiveResult.result
       );
 
       if (saveResult) {
         savedAnalysisId = saveResult.id;
-        logger.info('Analysis saved to database', {
-          analysisId: savedAnalysisId,
-          projectId: body.project_id,
-        });
-      } else {
-        logger.warn('Failed to save analysis to database');
-        // Don't fail the request if saving fails
+        logger.info('Analysis saved', { analysisId: savedAnalysisId });
       }
     }
 
     const processingTime = Date.now() - startTime;
 
     logger.apiResponse('POST', '/api/analyze', 200, {
-      analysisId: analysisResult.data.analysis_id || analysisResult.data.metadata?.analysis_id,
+      analysisId: comprehensiveResult.result.metadata?.analysis_id,
       savedId: savedAnalysisId,
-      problemsFound: analysisResult.data.problems?.length || analysisResult.data.problem_analysis?.length || 0,
-      featuresGenerated: analysisResult.data.features?.length || analysisResult.data.feature_system?.length || 0,
-      tasksCreated: analysisResult.data.tasks?.length || analysisResult.data.development_tasks?.length || 0,
-      provider: analysisResult.provider,
+      problemsFound: comprehensiveResult.result.problem_analysis?.length || 0,
+      featuresGenerated: comprehensiveResult.result.feature_system?.length || 0,
+      tasksCreated: comprehensiveResult.result.development_tasks?.length || 0,
+      provider: comprehensiveResult.provider,
       processingTime,
     });
 
     // Build response
     const response = {
-      ...analysisResult.data,
+      ...comprehensiveResult.result,
       saved_id: savedAnalysisId,
-      provider: analysisResult.provider,
+      provider: comprehensiveResult.provider,
       api_processing_time_ms: processingTime,
     };
 
@@ -273,18 +173,22 @@ export async function POST(request: NextRequest) {
 /**
  * GET /api/analyze
  * Get analysis history for authenticated user
- *
- * Query Parameters:
- * - project_id: Filter by project
- * - limit: Number of results (default: 20, max: 100)
- * - offset: Pagination offset (default: 0)
  */
 export async function GET(request: NextRequest) {
   try {
     logger.apiRequest('GET', '/api/analyze');
 
-    // Require authentication
-    const user = await requireAuth(supabase);
+    // Get server client and require auth
+    const supabase = await createServerSupabaseClient();
+    const user = await getUserOrAnonymous();
+
+    if (user.id === 'anonymous') {
+      return successResponse(
+        { analyses: [], total: 0, pagination: { limit: 20, offset: 0, total: 0, has_more: false } },
+        'Authentication required for history',
+        401
+      );
+    }
 
     // Get query parameters
     const { searchParams } = new URL(request.url);
@@ -305,7 +209,6 @@ export async function GET(request: NextRequest) {
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
 
-    // Filter by project if specified
     if (projectId) {
       query = query.eq('project_id', projectId);
     }
@@ -329,19 +232,16 @@ export async function GET(request: NextRequest) {
 
     const { count } = await countQuery;
 
-    // Transform results for response
+    // Transform results
     const transformedAnalyses = (analyses || []).map((analysis: any) => ({
       id: analysis.id,
       project_id: analysis.project_id,
       project_name: analysis.projects?.name,
       created_at: analysis.created_at,
-      // Include summary data only for list view
       summary: {
-        problems_count: analysis.result?.problems?.length || 0,
-        features_count: analysis.result?.features?.length || 0,
-        tasks_count: analysis.result?.tasks?.length || 0,
-        executive_summary: analysis.result?.executive_summary,
-        confidence_score: analysis.result?.impact?.confidence_score,
+        problems_count: analysis.result?.problem_analysis?.length || 0,
+        features_count: analysis.result?.feature_system?.length || 0,
+        tasks_count: analysis.result?.development_tasks?.length || 0,
       },
     }));
 

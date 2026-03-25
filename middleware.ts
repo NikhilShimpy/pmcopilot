@@ -4,6 +4,8 @@ import { NextResponse, type NextRequest } from 'next/server'
 /**
  * Middleware for route protection and session management
  * Protects /dashboard routes and refreshes auth tokens
+ *
+ * Next.js 16+: This middleware pattern is still valid for auth
  */
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({
@@ -86,15 +88,10 @@ export async function middleware(request: NextRequest) {
   return response
 }
 
+// Updated matcher config for Next.js 16+
 export const config = {
   matcher: [
-    /*
-     * Match all request paths except for the ones starting with:
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     * - public files (public folder)
-     */
+    // Match all paths except static files and images
     '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 }

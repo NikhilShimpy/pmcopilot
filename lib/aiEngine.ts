@@ -1,10 +1,11 @@
 /**
- * PMCopilot - Core AI Analysis Engine
+ * PMCopilot - Core AI Analysis Engine v3.0
  *
- * Multi-stage AI pipeline for comprehensive feedback analysis
- * Primary: Groq API (Free - Llama 3.1 70B)
- * Fallback 1: Groq Fast Model (Free - Llama 3.1 8B)
- * Fallback 2: Hugging Face Inference API (Free - Mixtral 8x7B)
+ * PRODUCTION-READY AI PIPELINE
+ * PRIMARY: Google Gemini API
+ * FALLBACK: Groq (ONLY if Gemini fails)
+ *
+ * REMOVED: Ollama, HuggingFace, OpenRouter
  */
 
 import axios from 'axios';
@@ -37,7 +38,20 @@ interface AIMessage {
   content: string;
 }
 
-interface OpenRouterResponse {
+interface GeminiResponse {
+  candidates: Array<{
+    content: {
+      parts: Array<{ text: string }>;
+    };
+  }>;
+  usageMetadata?: {
+    promptTokenCount: number;
+    candidatesTokenCount: number;
+    totalTokenCount: number;
+  };
+}
+
+interface GroqResponse {
   choices: Array<{
     message: {
       content: string;
@@ -51,7 +65,103 @@ interface OpenRouterResponse {
 }
 
 // ============================================
-// GROQ API CLIENT (Primary - Free & Fast)
+// GEMINI API CLIENT (PRIMARY)
+// ============================================
+
+async function callGemini(
+  messages: AIMessage[],
+  options: {
+    temperature?: number;
+    max_tokens?: number;
+    timeout?: number;
+    jsonMode?: boolean;
+  } = {}
+): Promise<string> {
+  const {
+    temperature = AI_CONFIG.DEFAULT_TEMPERATURE,
+    max_tokens = AI_CONFIG.DEFAULT_MAX_TOKENS,
+    timeout = AI_CONFIG.GEMINI.TIMEOUT,
+    jsonMode = true,
+  } = options;
+
+  const model = AI_CONFIG.GEMINI.DEFAULT_MODEL;
+  const url = `${AI_CONFIG.GEMINI.BASE_URL}/${model}:generateContent?key=${config.gemini.apiKey}`;
+
+  logger.ai('Calling Gemini API (PRIMARY)', 'gemini', {
+    messageCount: messages.length,
+    model,
+    jsonMode,
+  });
+
+  try {
+    // Convert messages to Gemini format
+    const systemMessage = messages.find(m => m.role === 'system');
+    const userMessages = messages.filter(m => m.role !== 'system');
+
+    const contents = userMessages.map(m => ({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: m.content }]
+    }));
+
+    const generationConfig: any = {
+      temperature,
+      maxOutputTokens: max_tokens,
+    };
+
+    // Only add JSON mode for analysis, not for chat
+    if (jsonMode) {
+      generationConfig.responseMimeType = 'application/json';
+    }
+
+    const requestBody: any = {
+      contents,
+      generationConfig,
+    };
+
+    // Add system instruction if present
+    if (systemMessage) {
+      requestBody.systemInstruction = {
+        parts: [{ text: systemMessage.content }]
+      };
+    }
+
+    const response = await axios.post<GeminiResponse>(
+      url,
+      requestBody,
+      {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        timeout,
+      }
+    );
+
+    const content = response.data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+    if (!content) {
+      throw new Error('No content in Gemini response');
+    }
+
+    logger.ai('Gemini API call successful', 'gemini', {
+      tokens: response.data.usageMetadata?.totalTokenCount,
+      model,
+    });
+
+    return content;
+  } catch (error: any) {
+    if (error.response) {
+      logger.error('Gemini API error response', {
+        status: error.response.status,
+        data: JSON.stringify(error.response.data).substring(0, 500),
+        model,
+      });
+    }
+    throw error;
+  }
+}
+
+// ============================================
+// GROQ API CLIENT (FALLBACK ONLY)
 // ============================================
 
 async function callGroq(
@@ -60,120 +170,84 @@ async function callGroq(
     temperature?: number;
     max_tokens?: number;
     timeout?: number;
-    useFastModel?: boolean;
+    jsonMode?: boolean;
   } = {}
 ): Promise<string> {
   const {
     temperature = AI_CONFIG.DEFAULT_TEMPERATURE,
     max_tokens = AI_CONFIG.DEFAULT_MAX_TOKENS,
     timeout = AI_CONFIG.GROQ.TIMEOUT,
-    useFastModel = false,
+    jsonMode = true,
   } = options;
 
-  const model = useFastModel
-    ? AI_CONFIG.GROQ.FAST_MODEL
-    : AI_CONFIG.GROQ.DEFAULT_MODEL;
-
+  // Cap max_tokens to Groq's limit (8192 for output)
+  const safeMaxTokens = Math.min(max_tokens, 8000);
+  const model = AI_CONFIG.GROQ.DEFAULT_MODEL;
   const url = `${AI_CONFIG.GROQ.BASE_URL}${AI_CONFIG.GROQ.CHAT_ENDPOINT}`;
 
-  logger.ai(`Calling Groq API${useFastModel ? ' (FAST MODEL)' : ''}`, 'groq', {
+  logger.ai('Calling Groq API (FALLBACK)', 'groq', {
     messageCount: messages.length,
     model,
+    jsonMode,
   });
 
-  const response = await axios.post<OpenRouterResponse>(
-    url,
-    {
+  try {
+    const requestBody: any = {
       model,
       messages,
       temperature,
-      max_tokens,
-      response_format: { type: 'json_object' },
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${config.groq.apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      timeout,
+      max_tokens: safeMaxTokens,
+    };
+
+    // Only add JSON format for analysis calls, not chat
+    if (jsonMode) {
+      // For JSON mode, ensure the message contains "json" word (Groq requirement)
+      const hasJsonKeyword = messages.some(m =>
+        m.content.toLowerCase().includes('json')
+      );
+      if (hasJsonKeyword) {
+        requestBody.response_format = { type: 'json_object' };
+      }
     }
-  );
 
-  const content = response.data.choices[0]?.message?.content;
+    const response = await axios.post<GroqResponse>(
+      url,
+      requestBody,
+      {
+        headers: {
+          Authorization: `Bearer ${config.groq.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        timeout,
+      }
+    );
 
-  if (!content) {
-    throw new Error('No content in Groq response');
+    const content = response.data.choices[0]?.message?.content;
+
+    if (!content) {
+      throw new Error('No content in Groq response');
+    }
+
+    logger.ai('Groq API call successful', 'groq', {
+      tokens: response.data.usage?.total_tokens,
+      model,
+    });
+
+    return content;
+  } catch (error: any) {
+    if (error.response) {
+      logger.error('Groq API error response', {
+        status: error.response.status,
+        data: JSON.stringify(error.response.data).substring(0, 500),
+        model,
+      });
+    }
+    throw error;
   }
-
-  logger.ai('Groq API call successful', 'groq', {
-    tokens: response.data.usage?.total_tokens,
-    model,
-  });
-
-  return content;
 }
 
 // ============================================
-// HUGGING FACE API CLIENT (Fallback - Free)
-// ============================================
-
-async function callHuggingFace(
-  messages: AIMessage[],
-  options: {
-    temperature?: number;
-    max_tokens?: number;
-    timeout?: number;
-  } = {}
-): Promise<string> {
-  const {
-    temperature = AI_CONFIG.DEFAULT_TEMPERATURE,
-    max_tokens = AI_CONFIG.DEFAULT_MAX_TOKENS,
-    timeout = 60000,
-  } = options;
-
-  logger.ai('Calling Hugging Face API (fallback)', 'huggingface', {
-    messageCount: messages.length,
-  });
-
-  // Use Mixtral-8x7B-Instruct (free on HF Inference API)
-  const url = 'https://api-inference.huggingface.co/models/mistralai/Mixtral-8x7B-Instruct-v0.1/v1/chat/completions';
-
-  // Convert messages to chat format
-  const formattedMessages = messages.map(m => ({
-    role: m.role,
-    content: m.content,
-  }));
-
-  const response = await axios.post(
-    url,
-    {
-      model: 'mistralai/Mixtral-8x7B-Instruct-v0.1',
-      messages: formattedMessages,
-      temperature,
-      max_tokens,
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${config.huggingface.apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      timeout,
-    }
-  );
-
-  const content = response.data.choices?.[0]?.message?.content;
-
-  if (!content) {
-    throw new Error('No content in Hugging Face response');
-  }
-
-  logger.ai('Hugging Face API call successful', 'huggingface');
-
-  return content;
-}
-
-// ============================================
-// AI CALL WITH FALLBACK CHAIN
+// AI CALL WITH FALLBACK (GEMINI -> GROQ)
 // ============================================
 
 export async function callAI(
@@ -183,47 +257,47 @@ export async function callAI(
     max_tokens?: number;
     timeout?: number;
     retries?: number;
+    jsonMode?: boolean;
   } = {}
-): Promise<{ content: string; provider: 'groq' | 'groq-fast' | 'huggingface' }> {
-  const { retries = AI_CONFIG.MAX_RETRIES, ...callOptions } = options;
+): Promise<{ content: string; provider: 'gemini' | 'groq' }> {
+  const { retries = AI_CONFIG.MAX_RETRIES, jsonMode = true, ...callOptions } = options;
 
   let lastError: Error | null = null;
 
-  // PRIMARY: Try Groq with main model (Llama 3.1 70B - Free & Powerful)
+  // PRIMARY: Try Gemini with retries
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      logger.info(`Gemini attempt ${attempt + 1}/${retries + 1}`);
+      const content = await callGemini(messages, { ...callOptions, jsonMode });
+      return { content, provider: 'gemini' };
+    } catch (error) {
+      lastError = error as Error;
+      logger.warn(`Gemini attempt ${attempt + 1} failed`, {
+        error: lastError.message,
+      });
+
+      if (attempt < retries) {
+        await sleep(1000 * (attempt + 1)); // Exponential backoff
+      }
+    }
+  }
+
+  // FALLBACK: Try Groq (single attempt)
+  logger.warn('Gemini failed after all retries, falling back to Groq', {
+    geminiError: lastError?.message,
+  });
+
   try {
-    const executeRequest = async () => callGroq(messages, { ...callOptions, useFastModel: false });
-    const content = await retry(executeRequest, retries);
+    const content = await callGroq(messages, { ...callOptions, jsonMode });
     return { content, provider: 'groq' };
   } catch (error) {
-    lastError = error as Error;
-    logger.warn('Groq main model failed, trying fast model', {
-      error: lastError.message,
-    });
-  }
-
-  // SECONDARY: Try Groq with fast model (Llama 3.1 8B - Free & Fast)
-  try {
-    logger.info('Attempting Groq FAST model fallback');
-    const content = await callGroq(messages, { ...callOptions, useFastModel: true });
-    return { content, provider: 'groq-fast' };
-  } catch (error) {
-    const groqFastError = error as Error;
-    logger.warn('Groq fast model also failed, attempting Hugging Face fallback', {
-      error: groqFastError.message,
-    });
-  }
-
-  // FALLBACK: Try Hugging Face (Mixtral - Free)
-  try {
-    const content = await callHuggingFace(messages, callOptions);
-    return { content, provider: 'huggingface' };
-  } catch (error) {
+    const groqError = error as Error;
     logger.error('All AI providers failed', {
-      groqError: lastError?.message,
-      huggingfaceError: error instanceof Error ? error.message : 'Unknown error',
+      geminiError: lastError?.message,
+      groqError: groqError.message,
     });
     throw new Error(
-      `All AI providers failed. Groq: ${lastError?.message}. Hugging Face: ${error instanceof Error ? error.message : 'Unknown'}`
+      `All AI providers failed. Gemini: ${lastError?.message}. Groq: ${groqError.message}`
     );
   }
 }
@@ -233,19 +307,33 @@ export async function callAI(
 // ============================================
 
 function extractJSON(content: string): string {
-  // Try to find JSON in the content
-  const jsonMatch = content.match(/\{[\s\S]*\}/);
+  // Remove markdown code blocks if present
+  let cleaned = content.trim();
+
+  // Remove ```json and ``` markers
+  if (cleaned.startsWith('```json')) {
+    cleaned = cleaned.slice(7);
+  } else if (cleaned.startsWith('```')) {
+    cleaned = cleaned.slice(3);
+  }
+  if (cleaned.endsWith('```')) {
+    cleaned = cleaned.slice(0, -3);
+  }
+  cleaned = cleaned.trim();
+
+  // Try to find JSON object in the content
+  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
   if (jsonMatch) {
     return jsonMatch[0];
   }
 
   // Try to find JSON array
-  const arrayMatch = content.match(/\[[\s\S]*\]/);
+  const arrayMatch = cleaned.match(/\[[\s\S]*\]/);
   if (arrayMatch) {
     return arrayMatch[0];
   }
 
-  return content;
+  return cleaned;
 }
 
 function parseJSON<T>(content: string): T {
@@ -255,15 +343,27 @@ function parseJSON<T>(content: string): T {
   } catch (error) {
     // Try to fix common JSON issues
     const fixed = extracted
-      .replace(/,\s*}/g, '}') // Remove trailing commas
+      .replace(/,\s*}/g, '}') // Remove trailing commas in objects
       .replace(/,\s*]/g, ']') // Remove trailing commas in arrays
-      .replace(/'/g, '"') // Replace single quotes
-      .replace(/(\w+):/g, '"$1":') // Quote unquoted keys
-      .replace(/:\s*'([^']*)'/g, ': "$1"'); // Fix single-quoted values
+      .replace(/[\u0000-\u001F\u007F-\u009F]/g, '') // Remove control characters
+      .replace(/\n/g, '\\n') // Escape newlines in strings
+      .replace(/\r/g, '\\r') // Escape carriage returns
+      .replace(/\t/g, '\\t'); // Escape tabs
 
     try {
       return JSON.parse(fixed) as T;
     } catch {
+      // Try one more time with more aggressive fixing
+      try {
+        // Extract just the JSON structure
+        const jsonStart = fixed.indexOf('{');
+        const jsonEnd = fixed.lastIndexOf('}');
+        if (jsonStart !== -1 && jsonEnd !== -1) {
+          const jsonStr = fixed.slice(jsonStart, jsonEnd + 1);
+          return JSON.parse(jsonStr) as T;
+        }
+      } catch {}
+
       throw new Error(`Failed to parse JSON: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
@@ -392,8 +492,14 @@ function getFeatureGenerationPrompt(problems: Problem[], context?: PipelineConte
 - Target Users: ${context.user_persona || 'General users'}`
     : '';
 
-  const systemPrompt = `You are a senior product manager. Generate feature suggestions that solve the identified problems.
+  const systemPrompt = `You are a senior product manager. Generate COMPREHENSIVE feature suggestions that solve the identified problems.
 ${contextInfo}
+
+CRITICAL REQUIREMENTS:
+- Generate MINIMUM 15-20 features (this is mandatory)
+- Cover ALL problem areas identified
+- Include a mix of quick wins (Simple) and strategic features (Complex)
+- Each feature must have clear explainability
 
 OUTPUT FORMAT (JSON):
 {
@@ -406,9 +512,16 @@ OUTPUT FORMAT (JSON):
       "linked_problems": ["problem IDs this addresses"],
       "complexity": "Simple" | "Medium" | "Complex",
       "estimated_impact": "description of expected impact",
+      "user_value": "direct benefit to users",
+      "business_value": "business outcome (revenue, retention, efficiency)",
       "supporting_evidence": ["quotes from feedback supporting this feature"]
     }
   ],
+  "feature_categories": {
+    "quick_wins": ["feature IDs for simple, high-impact features"],
+    "core_features": ["feature IDs for medium complexity essentials"],
+    "strategic_features": ["feature IDs for complex, long-term value"]
+  },
   "prioritization_rationale": "explanation of priority decisions"
 }
 
@@ -417,13 +530,13 @@ PRIORITIZATION RULES:
 - Medium: Important but not urgent; builds on existing features
 - Low: Nice-to-haves; future considerations
 
-Include WHY each feature was suggested for full explainability.`;
+Generate AT LEAST 15 features. Include WHY each feature was suggested for full explainability.`;
 
   return [
     { role: 'system', content: systemPrompt },
     {
       role: 'user',
-      content: `Generate feature suggestions for these problems:\n\n${JSON.stringify(problems, null, 2)}`,
+      content: `Generate MINIMUM 15-20 feature suggestions for these problems:\n\n${JSON.stringify(problems, null, 2)}`,
     },
   ];
 }
@@ -475,17 +588,23 @@ OUTPUT FORMAT (JSON):
       role: 'user',
       content: `Create a PRD for ${contextInfo} based on:
 
-PROBLEMS:
-${JSON.stringify(problems.slice(0, 5), null, 2)}
+PROBLEMS (${problems.length} total):
+${JSON.stringify(problems.slice(0, 10), null, 2)}
 
-TOP FEATURES:
-${JSON.stringify(features.slice(0, 3), null, 2)}`,
+TOP FEATURES (${features.length} total):
+${JSON.stringify(features.slice(0, 8), null, 2)}`,
     },
   ];
 }
 
 function getTaskGenerationPrompt(features: Feature[], prd: PRD): AIMessage[] {
   const systemPrompt = `You are a technical lead breaking down features into development tasks (Jira-style).
+
+CRITICAL REQUIREMENTS:
+- Generate MINIMUM 25-40 tasks across all features
+- Cover ALL task types (frontend, backend, API, database, testing, design)
+- Each feature should have 3-6 related tasks
+- Include proper dependencies between tasks
 
 OUTPUT FORMAT (JSON):
 {
@@ -494,36 +613,48 @@ OUTPUT FORMAT (JSON):
       "id": "TASK-001",
       "title": "Task title",
       "description": "Detailed task description",
-      "type": "frontend" | "backend" | "api" | "database" | "infrastructure" | "design" | "testing",
+      "type": "frontend" | "backend" | "api" | "database" | "infrastructure" | "design" | "testing" | "documentation",
       "priority": "Critical" | "High" | "Medium" | "Low",
       "story_points": number (1, 2, 3, 5, 8, 13),
       "size": "XS" | "S" | "M" | "L" | "XL",
+      "estimated_hours": number,
       "linked_feature": "feature ID this implements",
       "dependencies": ["other task IDs this depends on"],
       "technical_notes": "implementation hints",
-      "acceptance_criteria": ["task-specific acceptance criteria"]
+      "acceptance_criteria": ["task-specific acceptance criteria"],
+      "skills_required": ["React", "Node.js", "SQL", etc.]
     }
   ],
-  "sprint_recommendation": "suggested sprint organization"
+  "task_summary": {
+    "total_tasks": number,
+    "by_type": { "frontend": n, "backend": n, ... },
+    "by_priority": { "Critical": n, "High": n, ... },
+    "total_story_points": number,
+    "total_estimated_hours": number
+  },
+  "sprint_recommendation": "suggested sprint organization with phases"
 }
 
 TASK GUIDELINES:
-- Each task should be completable in 1-3 days
-- Include all task types (frontend, backend, testing, etc.)
+- Each task should be completable in 1-3 days (4-24 hours)
+- Include all task types (frontend, backend, testing, design, documentation)
 - Consider dependencies between tasks
-- Provide realistic story point estimates`;
+- Provide realistic story point estimates
+- Generate AT LEAST 25 tasks total`;
 
   return [
     { role: 'system', content: systemPrompt },
     {
       role: 'user',
-      content: `Generate development tasks for:
+      content: `Generate MINIMUM 25-40 development tasks for:
 
-FEATURES:
+FEATURES (${features.length} total):
 ${JSON.stringify(features, null, 2)}
 
 PRD ACCEPTANCE CRITERIA:
-${JSON.stringify(prd.acceptance_criteria, null, 2)}`,
+${JSON.stringify(prd.acceptance_criteria, null, 2)}
+
+Remember: Generate AT LEAST 25 tasks covering all aspects of development.`,
     },
   ];
 }
@@ -561,17 +692,17 @@ OUTPUT FORMAT (JSON):
       role: 'user',
       content: `Estimate the impact of implementing these solutions:
 
-TOP PROBLEMS (by severity):
+TOP PROBLEMS (${problems.length} total, by severity):
 ${JSON.stringify(
   problems
     .sort((a, b) => b.severity_score - a.severity_score)
-    .slice(0, 5),
+    .slice(0, 10),
   null,
   2
 )}
 
-PROPOSED FEATURES:
-${JSON.stringify(features.slice(0, 5), null, 2)}
+PROPOSED FEATURES (${features.length} total):
+${JSON.stringify(features.slice(0, 10), null, 2)}
 
 ${context?.industry ? `Industry: ${context.industry}` : ''}`,
     },
@@ -657,7 +788,7 @@ export async function runAnalysisPipeline(
   success: boolean;
   result?: ComprehensiveAnalysisResult;
   error?: string;
-  provider?: 'groq' | 'groq-fast' | 'huggingface';
+  provider?: 'gemini' | 'groq';
 }> {
   const pipelineStart = Date.now();
   const analysisId = `analysis-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
@@ -772,12 +903,11 @@ export async function runAnalysisPipeline(
       analysis_id: analysisId,
       created_at: new Date().toISOString(),
       processing_time_ms: processingTime,
-      model_used: AI_CONFIG.GROQ.DEFAULT_MODEL,
+      model_used: AI_CONFIG.GEMINI.DEFAULT_MODEL,
       total_feedback_items: cleanedFeedback.length,
 
       // Core Results
       problems: problems.sort((a, b) => {
-        // Sort by combined score (frequency + severity)
         const scoreA = a.frequency_score + a.severity_score;
         const scoreB = b.frequency_score + b.severity_score;
         return scoreB - scoreA;
@@ -830,7 +960,7 @@ export async function runAnalysisPipeline(
     return {
       success: true,
       result,
-      provider: 'groq',
+      provider: 'gemini',
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -870,14 +1000,12 @@ function generateExecutiveSummary(
 function generateKeyFindings(problems: Problem[], features: Feature[]): string[] {
   const findings: string[] = [];
 
-  // Top 3 problems
   problems.slice(0, 3).forEach((problem) => {
     findings.push(
       `Problem: "${problem.title}" - Severity: ${problem.severity_score}/10, Frequency: ${problem.frequency_score}/10`
     );
   });
 
-  // High priority features count
   const highPriorityCount = features.filter((f) => f.priority === 'High').length;
   findings.push(`${highPriorityCount} high-priority features identified for immediate consideration`);
 
@@ -891,13 +1019,11 @@ function generateImmediateActions(
 ): string[] {
   const actions: string[] = [];
 
-  // Critical problems
   const criticalProblems = problems.filter((p) => p.severity_score >= 8);
   if (criticalProblems.length > 0) {
     actions.push(`Address ${criticalProblems.length} critical problems immediately`);
   }
 
-  // Quick wins
   const quickWins = features.filter(
     (f) => f.priority === 'High' && f.complexity === 'Simple'
   );
@@ -905,7 +1031,6 @@ function generateImmediateActions(
     actions.push(`Implement quick wins: ${quickWins.map((f) => f.name).join(', ')}`);
   }
 
-  // Critical tasks
   const criticalTasks = tasks.filter((t) => t.priority === 'Critical');
   if (criticalTasks.length > 0) {
     actions.push(`Prioritize ${criticalTasks.length} critical development tasks`);
@@ -926,7 +1051,6 @@ export function validateAnalysisResult(result: any): ValidationResult {
   const errors: ValidationError[] = [];
   const warnings: string[] = [];
 
-  // Check required top-level fields
   const requiredFields = ['problems', 'features', 'prd', 'tasks', 'impact'];
   for (const field of requiredFields) {
     if (!result[field]) {
@@ -939,7 +1063,6 @@ export function validateAnalysisResult(result: any): ValidationResult {
     }
   }
 
-  // Validate problems array
   if (Array.isArray(result.problems)) {
     result.problems.forEach((problem: any, index: number) => {
       if (!problem.title) {
@@ -958,7 +1081,6 @@ export function validateAnalysisResult(result: any): ValidationResult {
     });
   }
 
-  // Validate features array
   if (Array.isArray(result.features)) {
     result.features.forEach((feature: any, index: number) => {
       if (!feature.name) {
@@ -975,7 +1097,6 @@ export function validateAnalysisResult(result: any): ValidationResult {
     });
   }
 
-  // Validate PRD
   if (result.prd) {
     if (!result.prd.title) {
       errors.push({ field: 'prd.title', message: 'PRD missing title' });
@@ -985,7 +1106,6 @@ export function validateAnalysisResult(result: any): ValidationResult {
     }
   }
 
-  // Validate impact
   if (result.impact) {
     if (
       typeof result.impact.confidence_score !== 'number' ||

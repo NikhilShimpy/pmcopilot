@@ -1,16 +1,20 @@
 /**
- * PMCopilot - Comprehensive Product Strategy Engine
+ * PMCopilot - Comprehensive Product Strategy Engine v3.0
  *
- * Complete Product Thinking Engine that generates:
- * - YC-level pitch deck content
- * - McKinsey-quality analysis
- * - CTO execution document
+ * PRODUCTION-READY AI PIPELINE
+ * PRIMARY: Google Gemini API
+ * FALLBACK: Groq (ONLY if Gemini fails)
  *
- * Outputs 13 detailed sections in a single AI call.
+ * OUTPUT REQUIREMENTS (STRICT):
+ * - MINIMUM 10 Problems (aim for 15)
+ * - MINIMUM 15 Features (aim for 25)
+ * - MINIMUM 25 Tasks (aim for 35)
  */
 
 import { callAI } from './aiEngine';
 import { logger } from './logger';
+import { generateFallbackAnalysis } from './fallbackAnalysis';
+import { AI_CONFIG } from '@/utils/constants';
 import {
   ComprehensiveStrategyResult,
   StrategicProblem,
@@ -34,35 +38,34 @@ import { PipelineContext } from '@/types/analysis';
 // ============================================
 
 function extractJSON(content: string): string {
-  // Try to find JSON object in the content
-  const jsonMatch = content.match(/\{[\s\S]*\}/);
+  let cleaned = content.trim();
+
+  // Remove markdown code blocks
+  if (cleaned.startsWith('```json')) {
+    cleaned = cleaned.slice(7);
+  } else if (cleaned.startsWith('```')) {
+    cleaned = cleaned.slice(3);
+  }
+  if (cleaned.endsWith('```')) {
+    cleaned = cleaned.slice(0, -3);
+  }
+  cleaned = cleaned.trim();
+
+  // Try to find JSON object
+  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
   if (jsonMatch) {
     return jsonMatch[0];
   }
-  return content;
+  return cleaned;
 }
 
 function safeParseJSON<T>(content: string, fallback: T): T {
-  const extracted = extractJSON(content);
-
   try {
-    return JSON.parse(extracted) as T;
+    const cleanedContent = extractJSON(content.trim());
+    return JSON.parse(cleanedContent);
   } catch (error) {
-    logger.warn('Failed to parse JSON, attempting cleanup', {
-      error: error instanceof Error ? error.message : 'Unknown'
-    });
-
-    // Try to fix common JSON issues
-    try {
-      let cleaned = extracted;
-      // Remove trailing commas
-      cleaned = cleaned.replace(/,\s*}/g, '}').replace(/,\s*]/g, ']');
-      // Fix unescaped quotes in strings (basic attempt)
-      return JSON.parse(cleaned) as T;
-    } catch {
-      logger.error('JSON parse failed after cleanup');
-      return fallback;
-    }
+    logger.warn('Failed to parse JSON', { error, content: content.substring(0, 200) });
+    return fallback;
   }
 }
 
@@ -84,7 +87,7 @@ export function getComprehensiveStrategyPrompt(
 
 You are NOT an assistant. You are a COMPLETE PRODUCT THINKING ENGINE.
 
----
+----
 
 ## YOUR OBJECTIVE
 
@@ -96,7 +99,7 @@ This must be:
 - ACTIONABLE with specific steps
 - NAVIGABLE with clear organization
 
----
+----
 
 ## THINKING MODE (CRITICAL)
 
@@ -108,7 +111,14 @@ You MUST:
 5. Compare and refine to best recommendations
 6. Think like: CTO + PM + Investor simultaneously
 
----
+⚠️ CRITICAL: MINIMUM OUTPUT REQUIREMENTS (MANDATORY - WILL BE REJECTED IF NOT MET):
+- MINIMUM 10 problems (aim for 15)
+- MINIMUM 15 features (aim for 25)
+- MINIMUM 25 development tasks (aim for 35)
+
+If you generate fewer than these minimums, the analysis will be rejected.
+
+----
 
 ## OUTPUT STRUCTURE (EXTREMELY IMPORTANT)
 
@@ -123,7 +133,7 @@ ${context ? `
 - Additional Context: ${context.project_context || 'None'}
 ` : ''}
 
----
+----
 
 ## REQUIRED OUTPUT FORMAT
 
@@ -138,7 +148,7 @@ ${context ? `
   },
 
   "problem_analysis": [
-    // MINIMUM 5, IDEALLY 8-10 problems
+    // ⚠️ CRITICAL: MINIMUM 10 problems, aim for 15
     {
       "id": "PROB-001",
       "title": "Concise problem title",
@@ -157,7 +167,7 @@ ${context ? `
   ],
 
   "feature_system": [
-    // MINIMUM 15, IDEALLY 20-30 features
+    // ⚠️ CRITICAL: MINIMUM 15 features, aim for 25 - THIS IS MANDATORY
     {
       "id": "FEAT-001",
       "name": "Feature name (clear, compelling)",
@@ -207,84 +217,46 @@ ${context ? `
     "goals_long_term": ["1-3 year goals (5-8 goals)"],
     "non_goals": ["What we explicitly won't do (5-8 items)"],
     "feature_requirements": ["Detailed feature requirement 1", "... (10-15 items)"],
-    "user_stories": [
-      // MINIMUM 10 user stories
-      {
-        "id": "US-001",
-        "persona": "Persona name",
-        "action": "What they want to do",
-        "benefit": "Why they want it",
-        "full_statement": "As a [persona], I want to [action] so that [benefit]",
-        "acceptance_criteria": ["AC 1", "AC 2", "AC 3"]
-      }
-    ],
     "acceptance_criteria": [
-      // MINIMUM 10 criteria
       {
         "id": "AC-001",
-        "description": "Detailed, testable criterion",
-        "priority": "Must" | "Should" | "Could",
-        "test_scenarios": ["How to test this"]
+        "requirement": "Specific requirement",
+        "criteria": "Measurable success criteria",
+        "testable": true,
+        "priority": "Must" | "Should" | "Could"
       }
     ],
-    "success_metrics": ["Metric 1: specific KPI with target", "... (8-12 metrics)"],
-    "risk_analysis": [
-      {
-        "risk": "Specific risk",
-        "impact": "High" | "Medium" | "Low",
-        "probability": "High" | "Medium" | "Low",
-        "mitigation": "How to mitigate"
-      }
-    ],
-    "assumptions": ["Key assumption 1", "... (5-10 assumptions)"],
-    "compliance": ["Compliance requirement 1 (if applicable)", "..."]
+    "success_metrics": ["measurable success criteria"],
+    "risks": ["potential risks and mitigations"],
+    "dependencies": ["technical or business dependencies"]
   },
 
   "system_design": {
-    "architecture_overview": "High-level architecture description (300-400 words)",
-    "frontend_components": [
+    "architecture_overview": "High-level system architecture (250-300 words)",
+    "core_components": [
       {
-        "name": "Component name",
-        "type": "frontend",
-        "description": "What it does",
-        "technologies": ["React", "Next.js", "..."],
-        "responsibilities": ["Responsibility 1", "..."]
+        "name": "Component Name",
+        "description": "What this component does",
+        "technologies": ["Tech 1", "Tech 2"],
+        "dependencies": ["Other components it needs"],
+        "scalability_considerations": "How it scales"
       }
     ],
-    "backend_services": [
-      {
-        "name": "Service name",
-        "type": "backend" | "service",
-        "description": "Service purpose",
-        "technologies": ["Node.js", "PostgreSQL", "..."],
-        "responsibilities": ["Responsibility 1", "..."]
-      }
-    ],
-    "database_design": [
-      {
-        "table_name": "Table name",
-        "description": "What it stores",
-        "columns": ["column1: type", "column2: type", "..."],
-        "relationships": ["Foreign key to X", "..."]
-      }
-    ],
-    "apis": [
-      {
-        "method": "GET" | "POST" | "PUT" | "DELETE",
-        "path": "/api/resource",
-        "description": "What it does",
-        "request_body": "Expected input (if applicable)",
-        "response": "Expected output"
-      }
-    ],
-    "ai_integration": "How AI/ML will be integrated (200-300 words)",
-    "data_flow": "How data flows through the system (200 words)",
-    "scalability_strategy": "How the system will scale (200 words)",
-    "security_considerations": ["Security measure 1", "... (5-10 items)"]
+    "data_models": "Key data structures and relationships (150-200 words)",
+    "api_design": "RESTful API structure and key endpoints (150-200 words)",
+    "security_considerations": ["Security measure 1", "Security measure 2", "..."],
+    "scalability_plan": "How the system scales to millions of users (200-250 words)",
+    "technology_stack": {
+      "frontend": ["Technology choices with reasoning"],
+      "backend": ["Technology choices with reasoning"],
+      "database": ["Technology choices with reasoning"],
+      "infrastructure": ["Cloud services and tools"],
+      "third_party": ["External APIs and services"]
+    }
   },
 
   "development_tasks": [
-    // MINIMUM 20, IDEALLY 30-40 tasks
+    // ⚠️ CRITICAL: MINIMUM 25 tasks, aim for 35 - MANDATORY
     {
       "id": "TASK-001",
       "title": "Clear task title",
@@ -304,148 +276,137 @@ ${context ? `
 
   "execution_roadmap": {
     "phase_1_mvp": {
-      "phase_name": "Phase 1: MVP",
-      "features": ["Feature 1", "Feature 2", "... (5-8 features)"],
-      "goals": ["Goal 1", "Goal 2", "..."],
-      "timeline": "X weeks",
-      "success_criteria": ["Criterion 1", "..."]
+      "duration": "X weeks",
+      "key_features": ["Feature 1", "Feature 2", "..."],
+      "success_criteria": ["Criterion 1", "Criterion 2"],
+      "resources_needed": ["Resource type and count"]
     },
-    "phase_2_scale": {
-      "phase_name": "Phase 2: Scale",
-      "features": ["Feature 1", "Feature 2", "..."],
-      "goals": ["Goal 1", "Goal 2", "..."],
-      "timeline": "X weeks",
-      "success_criteria": ["Criterion 1", "..."]
+    "phase_2_growth": {
+      "duration": "X weeks",
+      "key_features": ["Feature 1", "Feature 2", "..."],
+      "success_criteria": ["Criterion 1", "Criterion 2"],
+      "resources_needed": ["Resource type and count"]
     },
-    "phase_3_advanced": {
-      "phase_name": "Phase 3: Advanced",
-      "features": ["Feature 1", "Feature 2", "..."],
-      "goals": ["Goal 1", "Goal 2", "..."],
-      "timeline": "X weeks",
-      "success_criteria": ["Criterion 1", "..."]
+    "phase_3_scale": {
+      "duration": "X weeks",
+      "key_features": ["Feature 1", "Feature 2", "..."],
+      "success_criteria": ["Criterion 1", "Criterion 2"],
+      "resources_needed": ["Resource type and count"]
     },
-    "overall_timeline": "Total timeline summary"
-  },
-
-  "manpower_planning": {
-    "roles": [
-      {
-        "role": "Role title (e.g., Senior Frontend Developer)",
-        "count": <number>,
-        "skill_level": "Junior" | "Mid" | "Senior" | "Lead" | "Principal",
-        "responsibilities": ["Responsibility 1", "..."],
-        "skills_required": ["Skill 1", "Skill 2", "..."]
-      }
-    ],
-    "total_headcount": <number>,
-    "minimum_team": {
-      "description": "Lean startup approach",
-      "roles": [/* minimal roles */],
-      "total": <number>
-    },
-    "ideal_team": {
-      "description": "Fast growth approach",
-      "roles": [/* full roles */],
-      "total": <number>
-    },
-    "hiring_priority": ["Role 1 (hire first)", "Role 2", "..."]
-  },
-
-  "resource_requirements": {
-    "tools_needed": [
-      {
-        "name": "Tool name",
-        "category": "cloud" | "api" | "tool",
-        "description": "What it's for",
-        "provider": "Provider name",
-        "estimated_cost": "$X/month"
-      }
-    ],
-    "third_party_services": [/* same structure */],
-    "hardware_software": [/* same structure */],
-    "datasets": [/* if needed for AI/ML */]
-  },
-
-  "cost_estimation": {
-    "monthly_cost_infra_apis": <number>,
-    "development_cost": <number>,
-    "operational_cost": <number>,
-    "engineers_cost": <number>,
-    "cloud_cost": <number>,
-    "ai_api_cost": <number>,
-    "tools_cost": <number>,
-    "low_budget_version": {
-      "name": "Bootstrap",
-      "description": "Minimal viable budget",
-      "monthly_cost": <number>,
-      "annual_cost": <number>,
-      "breakdown": [/* cost items */]
-    },
-    "startup_version": {
-      "name": "Seed Funded",
-      "description": "Typical startup budget",
-      "monthly_cost": <number>,
-      "annual_cost": <number>,
-      "breakdown": [/* cost items */]
-    },
-    "scale_version": {
-      "name": "Series A",
-      "description": "Scale-up budget",
-      "monthly_cost": <number>,
-      "annual_cost": <number>,
-      "breakdown": [/* cost items */]
-    },
-    "total_first_year": <number>
-  },
-
-  "time_estimation": {
-    "mvp_timeline": "X weeks/months",
-    "full_product_timeline": "X months",
-    "per_feature_estimates": [
-      {
-        "feature_name": "Feature name",
-        "estimated_weeks": <number>,
-        "dependencies": ["Dependency 1", "..."]
-      }
-    ],
-    "total_weeks": <number>,
     "milestones": [
       {
         "name": "Milestone name",
-        "target_week": <number>,
-        "deliverables": ["Deliverable 1", "..."]
+        "date": "Target date",
+        "deliverables": ["What will be completed"],
+        "success_metrics": ["How success is measured"]
       }
     ]
   },
 
+  "manpower_planning": {
+    "team_composition": [
+      {
+        "role": "Role name (e.g., 'Senior React Developer')",
+        "count": 2,
+        "responsibilities": ["Responsibility 1", "Responsibility 2"],
+        "skills_required": ["Skill 1", "Skill 2"],
+        "seniority": "Junior" | "Mid" | "Senior" | "Lead",
+        "monthly_cost_inr": 75000
+      }
+    ],
+    "hiring_plan": "When and how to scale the team (150-200 words)",
+    "total_monthly_cost_inr": 450000,
+    "total_team_size": 6
+  },
+
+  "resource_planning": {
+    "infrastructure_costs": [
+      {
+        "service": "Service name (e.g., 'AWS EC2')",
+        "purpose": "What it's used for",
+        "monthly_cost_inr": 15000,
+        "scaling_factor": "How cost scales with usage"
+      }
+    ],
+    "third_party_services": [
+      {
+        "service": "Service name",
+        "purpose": "What it's used for",
+        "monthly_cost_inr": 5000
+      }
+    ],
+    "total_monthly_infrastructure_cost_inr": 50000
+  },
+
+  "cost_planning": {
+    "development_phase_cost_inr": {
+      "mvp": 2700000,
+      "growth": 4500000,
+      "scale": 6750000
+    },
+    "operational_costs_monthly_inr": {
+      "team": 450000,
+      "infrastructure": 50000,
+      "marketing": 200000,
+      "others": 100000
+    },
+    "total_first_year_cost_inr": 15000000,
+    "break_even_analysis": "When the product becomes profitable (100-150 words)",
+    "funding_requirements": "How much funding is needed and when (100-150 words)"
+  },
+
+  "time_planning": {
+    "mvp_timeline": {
+      "total_weeks": 12,
+      "key_milestones": [
+        {
+          "week": 2,
+          "milestone": "Architecture and setup complete"
+        },
+        {
+          "week": 6,
+          "milestone": "Core features implemented"
+        },
+        {
+          "week": 10,
+          "milestone": "Beta testing begins"
+        },
+        {
+          "week": 12,
+          "milestone": "MVP launch"
+        }
+      ]
+    },
+    "growth_phase_timeline": {
+      "total_weeks": 24,
+      "key_features_by_quarter": {
+        "q1": ["Feature set 1"],
+        "q2": ["Feature set 2"]
+      }
+    },
+    "critical_path": ["Critical dependency 1", "Critical dependency 2"],
+    "risk_buffers": "Built-in time buffers for unexpected issues (50-100 words)"
+  },
+
   "impact_analysis": {
-    "user_impact": "Detailed user impact description (150-200 words)",
-    "user_impact_score": <0-10>,
-    "business_impact": "Detailed business impact description (150-200 words)",
-    "business_impact_score": <0-10>,
-    "revenue_potential": "Revenue projection (100-150 words)",
-    "scalability_potential": "How this can scale (100-150 words)",
-    "confidence_score": <0-100>,
-    "time_to_value": "When users start seeing value"
+    "user_impact": "Qualitative description of user impact",
+    "user_impact_score": <1-10>,
+    "business_impact": "Qualitative description of business impact",
+    "business_impact_score": <1-10>,
+    "confidence_score": <0-1>,
+    "time_to_value": "Estimated time to see impact",
+    "affected_user_percentage": <0-100>,
+    "revenue_impact": "Increase" | "Decrease" | "Neutral",
+    "retention_impact": "Positive" | "Negative" | "Neutral",
+    "market_impact": "How this affects the broader market (100-150 words)",
+    "competitive_advantage": "Sustainable competitive advantages created (100-150 words)",
+    "long_term_vision": "5-year vision and potential (150-200 words)"
   }
 }
 
 ---
 
-## SELF-CHECK (CRITICAL)
-
-Before returning, verify:
-- problem_analysis has MINIMUM 5 problems (aim for 8-10)
-- feature_system has MINIMUM 15 features (aim for 20-30)
-- development_tasks has MINIMUM 20 tasks (aim for 30-40)
-- prd.user_stories has MINIMUM 10 stories
-- prd.personas has MINIMUM 3 personas
-- ALL sections are filled with detailed content
-- NO placeholder text like "..." or "TBD"
-
----
-
-## OUTPUT RULES
+**CRITICAL OUTPUT REQUIREMENTS:**
 
 1. Output ONLY valid JSON (no markdown, no code blocks, no explanation)
 2. Be EXTREMELY detailed - this is NOT a summary
@@ -465,11 +426,15 @@ START NOW. Output ONLY the JSON object.`;
 
 ${feedback}
 
-Remember:
+⚠️ CRITICAL REQUIREMENTS - MUST BE MET OR ANALYSIS WILL BE REJECTED:
+- MINIMUM 10 problems (aim for 15)
+- MINIMUM 15 features (aim for 25)
+- MINIMUM 25 development tasks (aim for 35)
 - Generate ALL 13 sections with FULL detail
-- Minimum 5 problems, 15 features, 20 tasks
 - Be comprehensive, not concise
-- Output ONLY valid JSON`,
+- Output ONLY valid JSON
+
+IF YOU GENERATE FEWER THAN THE MINIMUMS ABOVE, THE ANALYSIS WILL FAIL.`,
     },
   ];
 }
@@ -496,50 +461,79 @@ export async function runComprehensiveStrategyAnalysis(
     hasContext: !!context,
   });
 
+  // Set timeout to ensure reasonable response time
+  const ANALYSIS_TIMEOUT = 55000; // 55 seconds
+
   try {
-    // Get comprehensive strategy prompt
-    const messages = getComprehensiveStrategyPrompt(rawFeedback, context);
+    // Race between AI analysis and timeout
+    const analysisResult = await Promise.race([
+      // AI Analysis
+      (async () => {
+        const messages = getComprehensiveStrategyPrompt(rawFeedback, context);
 
-    // Call AI with high token limit for comprehensive output
-    const { content } = await callAI(messages, {
-      temperature: 0.7,
-      max_tokens: 16000, // High limit for comprehensive output
-    });
+        const { content, provider } = await callAI(messages, {
+          temperature: 0.7,
+          max_tokens: AI_CONFIG.DEFAULT_MAX_TOKENS,
+          timeout: ANALYSIS_TIMEOUT - 5000, // Leave buffer
+        });
 
-    // Parse the comprehensive result
-    const rawResult = safeParseJSON<any>(content, null);
+        const rawResult = safeParseJSON<any>(content, null);
 
-    if (!rawResult) {
-      throw new Error('Failed to parse AI response as JSON');
-    }
+        if (!rawResult) {
+          throw new Error('Failed to parse AI response as JSON');
+        }
+
+        return { rawResult, provider };
+      })(),
+
+      // Timeout fallback
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('Analysis timeout - using fallback')), ANALYSIS_TIMEOUT);
+      })
+    ]);
 
     // Validate minimum requirements
-    const problems = rawResult.problem_analysis || [];
-    const features = rawResult.feature_system || [];
-    const tasks = rawResult.development_tasks || [];
+    const problems = analysisResult.rawResult.problem_analysis || [];
+    const features = analysisResult.rawResult.feature_system || [];
+    const tasks = analysisResult.rawResult.development_tasks || [];
 
-    if (problems.length < 3) {
-      logger.warn('Fewer than 3 problems generated, expanding...');
+    // Log output metrics
+    logger.info('AI analysis output metrics', {
+      problems: problems.length,
+      features: features.length,
+      tasks: tasks.length,
+      provider: analysisResult.provider,
+    });
+
+    // Warn but don't fail if slightly under minimums
+    if (problems.length < 10) {
+      logger.warn(`Only ${problems.length} problems generated (minimum 10 recommended)`);
     }
-    if (features.length < 10) {
-      logger.warn('Fewer than 10 features generated');
+    if (features.length < 15) {
+      logger.warn(`Only ${features.length} features generated (minimum 15 recommended)`);
     }
-    if (tasks.length < 15) {
-      logger.warn('Fewer than 15 tasks generated');
+    if (tasks.length < 25) {
+      logger.warn(`Only ${tasks.length} tasks generated (minimum 25 recommended)`);
+    }
+
+    // If output is too minimal, use fallback
+    if (problems.length < 5 || features.length < 8 || tasks.length < 10) {
+      logger.warn('AI output too minimal, using fallback analysis');
+      throw new Error('Insufficient AI output quality');
     }
 
     // Ensure IDs are set
-    rawResult.problem_analysis = problems.map((p: any, i: number) => ({
+    analysisResult.rawResult.problem_analysis = problems.map((p: any, i: number) => ({
       ...p,
       id: p.id || `PROB-${String(i + 1).padStart(3, '0')}`,
     }));
 
-    rawResult.feature_system = features.map((f: any, i: number) => ({
+    analysisResult.rawResult.feature_system = features.map((f: any, i: number) => ({
       ...f,
       id: f.id || `FEAT-${String(i + 1).padStart(3, '0')}`,
     }));
 
-    rawResult.development_tasks = tasks.map((t: any, i: number) => ({
+    analysisResult.rawResult.development_tasks = tasks.map((t: any, i: number) => ({
       ...t,
       id: t.id || `TASK-${String(i + 1).padStart(3, '0')}`,
     }));
@@ -547,12 +541,12 @@ export async function runComprehensiveStrategyAnalysis(
     // Add metadata
     const processingTime = Date.now() - analysisStart;
     const result: ComprehensiveStrategyResult = {
-      ...rawResult,
+      ...analysisResult.rawResult,
       metadata: {
         analysis_id: analysisId,
         created_at: new Date().toISOString(),
         processing_time_ms: processingTime,
-        model_used: 'Groq Llama 3.1 70B (Comprehensive Strategy)',
+        model_used: `${analysisResult.provider || 'AI'} (Comprehensive Strategy)`,
         input_length: rawFeedback.length,
       },
     };
@@ -560,30 +554,48 @@ export async function runComprehensiveStrategyAnalysis(
     logger.info('Comprehensive Strategy Analysis Complete', {
       analysisId,
       processingTime,
-      problemsCount: result.problem_analysis.length,
-      featuresCount: result.feature_system.length,
-      tasksCount: result.development_tasks.length,
+      provider: analysisResult.provider,
+      problems: problems.length,
+      features: features.length,
+      tasks: tasks.length,
     });
 
     return {
       success: true,
       result,
-      provider: 'groq-comprehensive',
+      provider: analysisResult.provider
     };
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
-    logger.error('Comprehensive Strategy Analysis Failed', {
+  } catch (error) {
+    const processingTime = Date.now() - analysisStart;
+
+    logger.warn('AI analysis failed, using fallback system', {
+      error: error instanceof Error ? error.message : 'Unknown error',
+      processingTime
+    });
+
+    // Generate fallback analysis
+    const fallbackResult = generateFallbackAnalysis(rawFeedback);
+
+    // Update metadata
+    fallbackResult.metadata = {
+      ...fallbackResult.metadata,
+      analysis_id: analysisId,
+      processing_time_ms: processingTime,
+    };
+
+    logger.info('Fallback analysis generated successfully', {
       analysisId,
-      error: errorMessage,
-      processingTime: Date.now() - analysisStart,
+      problems: fallbackResult.problem_analysis?.length || 0,
+      features: fallbackResult.feature_system?.length || 0,
+      tasks: fallbackResult.development_tasks?.length || 0,
+      processingTime
     });
 
     return {
-      success: false,
-      error: errorMessage,
+      success: true,
+      result: fallbackResult,
+      provider: 'fallback',
     };
   }
 }
-
-export default runComprehensiveStrategyAnalysis;
