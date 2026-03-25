@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { supabase, requireAuth } from '@/lib/supabaseClient';
+import { createServerSupabaseClient, requireServerAuth } from '@/lib/supabase/server';
 import { logger } from '@/lib/logger';
 import { handleError, successResponse } from '@/lib/errorHandler';
 import { feedbackService } from '@/services/feedback.service';
@@ -11,14 +11,15 @@ import { SUCCESS_MESSAGES } from '@/utils/constants';
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const feedbackId = params.id;
+    const { id: feedbackId } = await params;
     logger.apiRequest('GET', `/api/feedback/${feedbackId}`);
 
-    // Require authentication
-    const user = await requireAuth(supabase);
+    // Get server client and require auth
+    const supabase = await createServerSupabaseClient();
+    const user = await requireServerAuth();
 
     // Fetch feedback
     const feedback = await feedbackService.getFeedbackById(
@@ -31,7 +32,8 @@ export async function GET(
 
     return successResponse(feedback);
   } catch (error) {
-    logger.apiResponse('GET', `/api/feedback/${params.id}`, 500);
+    const { id } = await params;
+    logger.apiResponse('GET', `/api/feedback/${id}`, 500);
     return handleError(error);
   }
 }
@@ -42,14 +44,15 @@ export async function GET(
  */
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const feedbackId = params.id;
+    const { id: feedbackId } = await params;
     logger.apiRequest('DELETE', `/api/feedback/${feedbackId}`);
 
-    // Require authentication
-    const user = await requireAuth(supabase);
+    // Get server client and require auth
+    const supabase = await createServerSupabaseClient();
+    const user = await requireServerAuth();
 
     // Delete feedback
     await feedbackService.deleteFeedback(supabase, user, feedbackId);
@@ -61,7 +64,8 @@ export async function DELETE(
       SUCCESS_MESSAGES.FEEDBACK_DELETED
     );
   } catch (error) {
-    logger.apiResponse('DELETE', `/api/feedback/${params.id}`, 500);
+    const { id } = await params;
+    logger.apiResponse('DELETE', `/api/feedback/${id}`, 500);
     return handleError(error);
   }
 }

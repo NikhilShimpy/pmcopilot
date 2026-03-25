@@ -3,11 +3,12 @@ import { createServerSupabaseClient } from '@/lib/supabase/server'
 import ProjectClient from './ProjectClient'
 
 interface ProjectPageProps {
-  params: { id: string }
+  params: Promise<{ id: string }>
 }
 
 export default async function ProjectPage({ params }: ProjectPageProps) {
-  const supabase = createServerSupabaseClient()
+  const { id } = await params
+  const supabase = await createServerSupabaseClient()
 
   const {
     data: { user },
@@ -21,7 +22,7 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
   const { data: project, error } = await supabase
     .from('projects')
     .select('*')
-    .eq('id', params.id)
+    .eq('id', id)
     .eq('user_id', user.id)
     .single()
 
@@ -33,12 +34,13 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
 }
 
 export async function generateMetadata({ params }: ProjectPageProps) {
-  const supabase = createServerSupabaseClient()
+  const { id } = await params
+  const supabase = await createServerSupabaseClient()
 
   const { data: project } = await supabase
     .from('projects')
     .select('name')
-    .eq('id', params.id)
+    .eq('id', id)
     .single()
 
   return {

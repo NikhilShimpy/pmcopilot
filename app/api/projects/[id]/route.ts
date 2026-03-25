@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { supabase, requireAuth } from '@/lib/supabaseClient';
+import { createServerSupabaseClient, requireServerAuth } from '@/lib/supabase/server';
 import { logger } from '@/lib/logger';
 import { handleError, successResponse } from '@/lib/errorHandler';
 import { projectService } from '@/services/project.service';
@@ -12,14 +12,15 @@ import { SUCCESS_MESSAGES } from '@/utils/constants';
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const projectId = params.id;
+    const { id: projectId } = await params;
     logger.apiRequest('GET', `/api/projects/${projectId}`);
 
-    // Require authentication
-    const user = await requireAuth(supabase);
+    // Get server client and require auth
+    const supabase = await createServerSupabaseClient();
+    const user = await requireServerAuth();
 
     // Fetch project
     const project = await projectService.getProjectById(
@@ -32,7 +33,8 @@ export async function GET(
 
     return successResponse(project);
   } catch (error) {
-    logger.apiResponse('GET', `/api/projects/${params.id}`, 500);
+    const { id } = await params;
+    logger.apiResponse('GET', `/api/projects/${id}`, 500);
     return handleError(error);
   }
 }
@@ -43,14 +45,15 @@ export async function GET(
  */
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const projectId = params.id;
+    const { id: projectId } = await params;
     logger.apiRequest('PUT', `/api/projects/${projectId}`);
 
-    // Require authentication
-    const user = await requireAuth(supabase);
+    // Get server client and require auth
+    const supabase = await createServerSupabaseClient();
+    const user = await requireServerAuth();
 
     // Parse request body
     const body: Partial<CreateProjectRequest> = await request.json();
@@ -67,7 +70,8 @@ export async function PUT(
 
     return successResponse(project, SUCCESS_MESSAGES.PROJECT_UPDATED);
   } catch (error) {
-    logger.apiResponse('PUT', `/api/projects/${params.id}`, 500);
+    const { id } = await params;
+    logger.apiResponse('PUT', `/api/projects/${id}`, 500);
     return handleError(error);
   }
 }
@@ -78,14 +82,15 @@ export async function PUT(
  */
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const projectId = params.id;
+    const { id: projectId } = await params;
     logger.apiRequest('DELETE', `/api/projects/${projectId}`);
 
-    // Require authentication
-    const user = await requireAuth(supabase);
+    // Get server client and require auth
+    const supabase = await createServerSupabaseClient();
+    const user = await requireServerAuth();
 
     // Delete project
     await projectService.deleteProject(supabase, user, projectId);
@@ -97,7 +102,8 @@ export async function DELETE(
       SUCCESS_MESSAGES.PROJECT_DELETED
     );
   } catch (error) {
-    logger.apiResponse('DELETE', `/api/projects/${params.id}`, 500);
+    const { id } = await params;
+    logger.apiResponse('DELETE', `/api/projects/${id}`, 500);
     return handleError(error);
   }
 }

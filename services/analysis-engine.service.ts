@@ -125,17 +125,16 @@ export class AnalysisEngineService {
 
   /**
    * Save analysis result to database
+   * NOTE: feedback_id column removed to simplify schema
    */
   async saveAnalysis(
     supabase: SupabaseClient,
     projectId: string,
-    result: ComprehensiveAnalysisResult,
-    feedbackId?: string
+    result: ComprehensiveAnalysisResult | any
   ): Promise<{ id: string } | null> {
     logger.info('Saving analysis to database', {
       projectId,
-      analysisId: result.analysis_id,
-      feedbackId,
+      analysisId: result.analysis_id || result.metadata?.analysis_id,
     });
 
     try {
@@ -143,7 +142,6 @@ export class AnalysisEngineService {
         .from(DB_TABLES.ANALYSES)
         .insert({
           project_id: projectId,
-          feedback_id: feedbackId || null,
           result: result,
         })
         .select('id')
@@ -152,6 +150,8 @@ export class AnalysisEngineService {
       if (error) {
         logger.error('Failed to save analysis to database', {
           error: error.message,
+          code: error.code,
+          details: error.details,
           projectId,
         });
         return null;

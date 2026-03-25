@@ -32,21 +32,23 @@ function getEnv(
 
 /**
  * Environment configuration object
- * Validates all required environment variables at runtime
+ *
+ * AI PROVIDERS:
+ * - PRIMARY: Google Gemini API
+ * - FALLBACK: Groq (only if Gemini fails)
+ *
+ * REMOVED: Ollama, HuggingFace, OpenRouter
  */
 export const config: EnvironmentConfig = {
   supabase: {
     url: getEnv('NEXT_PUBLIC_SUPABASE_URL'),
     anonKey: getEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY'),
   },
+  gemini: {
+    apiKey: getEnv('GEMINI_API_KEY'),
+  },
   groq: {
     apiKey: getEnv('GROQ_API_KEY'),
-  },
-  huggingface: {
-    apiKey: getEnv('HUGGINGFACE_API_KEY'),
-  },
-  openrouter: {
-    apiKey: getEnv('OPENROUTER_API_KEY', '', false),
   },
   app: {
     env: (getEnv('NODE_ENV', 'development', false) as 'development' | 'production' | 'test'),
@@ -77,11 +79,12 @@ export function validateEnvironment(): void {
     const requiredKeys = [
       config.supabase.url,
       config.supabase.anonKey,
+      config.gemini.apiKey,
       config.groq.apiKey,
-      config.huggingface.apiKey,
     ];
 
     console.log('[Config] Environment variables validated successfully ✓');
+    console.log('[Config] AI Providers: Gemini (PRIMARY) → Groq (FALLBACK)');
   } catch (error) {
     console.error('[Config] Environment validation failed:', error);
     throw error;
@@ -95,16 +98,12 @@ export function getSupabaseConfig() {
   return config.supabase;
 }
 
+export function getGeminiConfig() {
+  return config.gemini;
+}
+
 export function getGroqConfig() {
   return config.groq;
-}
-
-export function getHuggingFaceConfig() {
-  return config.huggingface;
-}
-
-export function getOpenRouterConfig() {
-  return config.openrouter;
 }
 
 export function getAppConfig() {

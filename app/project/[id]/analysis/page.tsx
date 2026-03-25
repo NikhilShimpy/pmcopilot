@@ -11,7 +11,7 @@ export default async function AnalysisPage({ params, searchParams }: AnalysisPag
   const { id: projectId } = await params
   const { analysis: analysisId } = await searchParams
 
-  const supabase = createServerSupabaseClient()
+  const supabase = await createServerSupabaseClient()
 
   // Check authentication
   const {
@@ -71,7 +71,7 @@ export default async function AnalysisPage({ params, searchParams }: AnalysisPag
 
 export async function generateMetadata({ params }: AnalysisPageProps) {
   const { id: projectId } = await params
-  const supabase = createServerSupabaseClient()
+  const supabase = await createServerSupabaseClient()
 
   const { data: project } = await supabase
     .from('projects')

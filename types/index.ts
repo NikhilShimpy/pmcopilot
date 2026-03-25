@@ -64,7 +64,7 @@ export interface AIResponse {
   success: boolean;
   data?: AnalysisResult;
   error?: string;
-  provider?: 'groq' | 'groq-fast' | 'huggingface' | 'openrouter' | 'puter';
+  provider?: 'gemini' | 'groq';
 }
 
 // ============================================
@@ -94,7 +94,7 @@ export interface PaginatedResponse<T> extends ApiResponse<T[]> {
 export interface User {
   id: string;
   email: string;
-  created_at: string;
+  created_at?: string;
   updated_at?: string;
 }
 
@@ -157,18 +157,24 @@ export interface LogEntry {
 // ENVIRONMENT TYPES
 // ============================================
 
+/**
+ * Environment configuration
+ *
+ * AI PROVIDERS:
+ * - PRIMARY: Google Gemini API
+ * - FALLBACK: Groq (only if Gemini fails)
+ *
+ * REMOVED: Ollama, HuggingFace, OpenRouter
+ */
 export interface EnvironmentConfig {
   supabase: {
     url: string;
     anonKey: string;
   };
+  gemini: {
+    apiKey: string;
+  };
   groq: {
-    apiKey: string;
-  };
-  huggingface: {
-    apiKey: string;
-  };
-  openrouter?: {
     apiKey: string;
   };
   app: {
