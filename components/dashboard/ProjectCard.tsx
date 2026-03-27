@@ -44,7 +44,9 @@ export default function ProjectCard({ project, onDelete, index }: ProjectCardPro
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index * 0.05 }}
-      className={`group relative bg-white rounded-xl border border-gray-200 hover:border-blue-200 hover:shadow-lg transition-all duration-300 ${
+      className={`group relative bg-white rounded-xl border border-gray-200
+        hover:border-pink-100 hover:shadow-lg hover:shadow-pink-25
+        transform hover:-translate-y-0.5 transition-all duration-300 ease-out ${
         isDeleting ? 'opacity-50 pointer-events-none' : ''
       }`}
     >
@@ -121,8 +123,11 @@ export default function ProjectCard({ project, onDelete, index }: ProjectCardPro
         </Link>
       </div>
 
-      {/* Hover Gradient */}
-      <div className="absolute inset-0 rounded-xl bg-gradient-to-br from-blue-500/5 to-indigo-500/5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+      {/* Very Subtle Hover Accent */}
+      <div className="absolute inset-0 rounded-xl bg-gradient-to-br from-pink-500/1 to-rose-400/1 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none -z-10" />
+
+      {/* Subtle Border Glow */}
+      <div className="absolute inset-0 rounded-xl ring-1 ring-pink-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
     </motion.div>
   )
 }

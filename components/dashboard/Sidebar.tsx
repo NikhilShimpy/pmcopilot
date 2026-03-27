@@ -21,8 +21,7 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ projectCount }: SidebarProps) {
-  const [collapsed, setCollapsed] = useState(false)
-  const pathname = usePathname()
+  const [collapsed, setCollapsed] = useState(true) // Start collapsed  const pathname = usePathname()
 
   const navItems = [
     {
@@ -71,7 +70,9 @@ export default function Sidebar({ projectCount }: SidebarProps) {
     <motion.aside
       initial={false}
       animate={{ width: collapsed ? 72 : 256 }}
-      className="h-screen bg-gray-900 text-white flex flex-col border-r border-gray-800 sticky top-0"
+      onMouseEnter={() => setCollapsed(false)}
+      onMouseLeave={() => setCollapsed(true)}
+      className="h-screen bg-gray-900 text-white flex flex-col border-r border-gray-800 sticky top-0 transition-all duration-300"
     >
       {/* Logo */}
       <div className="h-16 flex items-center px-4 border-b border-gray-800">
@@ -153,27 +154,6 @@ export default function Sidebar({ projectCount }: SidebarProps) {
             )}
           </Link>
         ))}
-
-        {/* Collapse Button */}
-        <button
-          onClick={() => setCollapsed(!collapsed)}
-          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-gray-400 hover:text-white hover:bg-gray-800 transition-all duration-200"
-        >
-          {collapsed ? (
-            <ChevronRight className="w-5 h-5 flex-shrink-0" />
-          ) : (
-            <ChevronLeft className="w-5 h-5 flex-shrink-0" />
-          )}
-          {!collapsed && (
-            <motion.span
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="font-medium"
-            >
-              Collapse
-            </motion.span>
-          )}
-        </button>
       </div>
     </motion.aside>
   )

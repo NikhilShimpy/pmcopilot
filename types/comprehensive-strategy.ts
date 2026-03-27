@@ -288,6 +288,95 @@ export interface CostBreakdownItem {
   subtotal_annual: number;
 }
 
+// ============================================
+// SECTION 10: RESOURCE PLANNING
+// ============================================
+
+export interface InfrastructureCost {
+  service: string;
+  purpose: string;
+  monthly_cost_inr: number;
+  scaling_factor: string;
+}
+
+export interface ThirdPartyService {
+  service: string;
+  purpose: string;
+  monthly_cost_inr: number;
+}
+
+export interface ResourcePlan {
+  infrastructure_costs: InfrastructureCost[];
+  third_party_services: ThirdPartyService[];
+  total_monthly_infrastructure_cost_inr: number;
+}
+
+// ============================================
+// SECTION 11: COST PLANNING (ENHANCED)
+// ============================================
+
+export interface TeamCost {
+  role: string;
+  count: number;
+  monthly_cost_inr: number;
+  seniority: 'Junior' | 'Mid' | 'Senior' | 'Lead' | 'Principal' | 'Director';
+  responsibilities: string[];
+  skills_required: string[];
+}
+
+export interface DevelopmentPhaseCost {
+  mvp: number;
+  growth: number;
+  scale: number;
+}
+
+export interface OperationalCostsMonthly {
+  team: number;
+  infrastructure: number;
+  marketing: number;
+  others: number;
+}
+
+export interface CostPlan {
+  // Development Phase Costs (in INR)
+  development_phase_cost_inr: DevelopmentPhaseCost;
+
+  // Monthly Operational Costs (in INR)
+  operational_costs_monthly_inr: OperationalCostsMonthly;
+
+  // Total First Year Cost (in INR)
+  total_first_year_cost_inr: number;
+
+  // Break-even Analysis
+  break_even_analysis: string;
+
+  // Funding Requirements
+  funding_requirements: string;
+
+  // Budget Scenario Analysis
+  budget_scenarios: {
+    lean_startup: {
+      total_cost_inr: number;
+      runway_months: number;
+      team_size: number;
+      description: string;
+    };
+    standard_startup: {
+      total_cost_inr: number;
+      runway_months: number;
+      team_size: number;
+      description: string;
+    };
+    well_funded: {
+      total_cost_inr: number;
+      runway_months: number;
+      team_size: number;
+      description: string;
+    };
+  };
+}
+
+// Legacy budget structure (backwards compatibility)
 export interface BudgetVersion {
   name: string;
   description: string;
@@ -296,7 +385,8 @@ export interface BudgetVersion {
   breakdown: CostBreakdownItem[];
 }
 
-export interface CostPlan {
+// Legacy support (keeping old structure for backwards compatibility)
+export interface LegacyCostPlan {
   monthly_cost_infra_apis: number;
   development_cost: number;
   operational_cost: number;
@@ -401,8 +491,9 @@ export interface ComprehensiveStrategyResult {
   // Section 10: Resource Requirements
   resource_requirements: ResourcePlan;
 
-  // Section 11: Cost Estimation
+  // Section 11: Cost Estimation (Enhanced)
   cost_estimation: CostPlan;
+  cost_planning: CostPlan; // Enhanced cost planning with INR support
 
   // Section 12: Time Estimation
   time_estimation: TimePlan;
