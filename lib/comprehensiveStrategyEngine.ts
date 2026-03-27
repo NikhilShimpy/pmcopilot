@@ -79,15 +79,52 @@ export function getComprehensiveStrategyPrompt(
 ): any[] {
   // Extract depth configuration if available
   const depthLevel = context?.depth || 'long';
-  const depthConfig = context?.depthConfig || {
-    minProblems: 12,
-    aimProblems: 18,
-    minFeatures: 18,
-    aimFeatures: 28,
-    minTasks: 28,
-    aimTasks: 40,
-    descriptionLength: 'comprehensive (200-400 words per section)',
+  
+  // Enhanced depth configurations with more aggressive scaling
+  const depthConfigs: Record<string, any> = {
+    short: {
+      minProblems: 8,
+      aimProblems: 12,
+      minFeatures: 12,
+      aimFeatures: 18,
+      minTasks: 18,
+      aimTasks: 28,
+      descriptionLength: 'moderate (100-200 words per section)',
+      prdDepth: 'concise but complete',
+    },
+    medium: {
+      minProblems: 12,
+      aimProblems: 18,
+      minFeatures: 18,
+      aimFeatures: 28,
+      minTasks: 28,
+      aimTasks: 40,
+      descriptionLength: 'detailed (200-350 words per section)',
+      prdDepth: 'comprehensive with examples',
+    },
+    long: {
+      minProblems: 15,
+      aimProblems: 22,
+      minFeatures: 22,
+      aimFeatures: 35,
+      minTasks: 35,
+      aimTasks: 50,
+      descriptionLength: 'highly detailed (350-500 words per section)',
+      prdDepth: 'exhaustive with case studies and evidence',
+    },
+    extralong: {
+      minProblems: 20,
+      aimProblems: 30,
+      minFeatures: 30,
+      aimFeatures: 45,
+      minTasks: 45,
+      aimTasks: 65,
+      descriptionLength: 'maximum detail (500-800 words per section)',
+      prdDepth: 'production-ready McKinsey-level documentation',
+    },
   };
+  
+  const depthConfig = context?.depthConfig || depthConfigs[depthLevel] || depthConfigs.long;
 
   const systemPrompt = `You are an ELITE AI PRODUCT ENGINE composed of:
 - **Chief Product Officer** (ex-Google, Meta, Amazon, Apple - 15+ years)
@@ -820,69 +857,230 @@ ${context ? `
 
   "cost_planning": {
     // ========================================
-    // CRITICAL: REALISTIC COST CALCULATION RULES
+    // 🎯 COMPREHENSIVE 28-FACTOR COST CALCULATION
     // ========================================
-    // Base calculation MUST consider:
-    // 1. Feature count (${depthConfig.minFeatures}-${depthConfig.aimFeatures} features)
-    // 2. Task complexity (${depthConfig.minTasks}-${depthConfig.aimTasks} tasks)
-    // 3. Manpower required (based on technical complexity)
-    // 4. Timeline (realistic for Indian development teams)
-    // 5. Indian market salary ranges and infrastructure costs
+    // You MUST analyze the project input and calculate costs based on ALL these factors:
+    
+    "cost_calculation_factors": {
+      // 1. Product Scope & Complexity
+      "scope_analysis": {
+        "feature_count": "COUNT from feature_system array - determines base complexity",
+        "feature_complexity_avg": "Average complexity (Low=1, Medium=2, High=3) across features",
+        "workflow_count": "Number of distinct user workflows/journeys",
+        "business_logic_complexity": "Simple CRUD | Medium Business Rules | Complex AI/Algorithms"
+      },
+      
+      // 2. User Scale & Infrastructure Needs  
+      "scale_requirements": {
+        "expected_users_mvp": "100-1000 (minimal) | 1K-10K (standard) | 10K+ (significant)",
+        "concurrency_needs": "Low (<100 concurrent) | Medium (100-1000) | High (1000+)",
+        "database_complexity": "Simple SQL | Complex relations | Multi-DB/sharding",
+        "scaling_architecture": "Single instance | Auto-scaling | Multi-region"
+      },
+      
+      // 3. UI/UX Requirements
+      "ui_ux_scope": {
+        "design_quality": "Template-based (₹0-1L) | Custom branded (₹1-3L) | Premium custom (₹3-8L)",
+        "screen_count": "5-10 (simple) | 10-25 (standard) | 25+ (complex)",
+        "animations_interactions": "Basic | Moderate | Advanced micro-interactions",
+        "responsive_complexity": "Mobile-first | Multi-breakpoint | Device-specific"
+      },
+      
+      // 4. Platform Requirements
+      "platform_scope": {
+        "platforms": ["web", "mobile-ios", "mobile-android", "desktop", "tablet"],
+        "platform_multiplier": "Web only (1x) | Web+1 mobile (1.6x) | Full cross-platform (2.2x)",
+        "pwa_requirements": "None | Basic PWA | Full offline-first"
+      },
+      
+      // 5. Technology Stack Complexity
+      "tech_stack_cost_impact": {
+        "frontend_complexity": "React/Vue (standard) | Next.js SSR (moderate) | Custom frameworks (high)",
+        "backend_complexity": "Monolith (lower) | Microservices (higher) | Serverless (varies)",
+        "database_choice": "PostgreSQL (standard) | MongoDB (standard) | Multi-DB (complex)"
+      },
+      
+      // 6. Advanced Technologies
+      "advanced_tech_costs": {
+        "ai_ml_features": "None (₹0) | Basic ML (₹2-5L) | Custom AI models (₹5-15L) | LLM integration (₹3-8L)",
+        "realtime_features": "None (₹0) | WebSockets (₹1-2L) | Complex real-time (₹3-5L)",
+        "blockchain": "None (₹0) | Basic integration (₹3-5L) | Custom smart contracts (₹8-15L)",
+        "iot_integration": "None (₹0) | Basic sensors (₹2-4L) | Complex IoT ecosystem (₹5-12L)",
+        "ar_vr": "None (₹0) | Basic AR (₹3-6L) | Full immersive (₹10-25L)"
+      },
+      
+      // 7. Third-Party Integrations
+      "integration_costs": {
+        "payment_gateways": "None (₹0) | Razorpay/Stripe (₹50K-1L) | Multiple gateways (₹1-2L)",
+        "maps_location": "None | Google Maps (₹20K-50K setup + usage) | Custom mapping (₹2-4L)",
+        "ai_apis": "None | OpenAI/Gemini (₹50K-2L setup + monthly) | Custom AI (₹5L+)",
+        "social_auth": "Basic OAuth (₹20K) | Full social suite (₹50K-1L)",
+        "enterprise_apis": "None | Standard APIs (₹50K-1L) | Complex B2B integrations (₹2-5L)"
+      },
+      
+      // 8. Security & Compliance
+      "security_compliance_cost": {
+        "basic_security": "₹50K-1L (HTTPS, input validation, basic auth)",
+        "enterprise_security": "₹2-4L (2FA, encryption at rest, audit logs, role-based access)",
+        "compliance_requirements": "None | GDPR (₹1-2L) | SOC2 (₹3-5L) | HIPAA (₹5-10L) | PCI-DSS (₹4-8L)"
+      },
+      
+      // 9-15: Infrastructure & Operations
+      "infrastructure_monthly": {
+        "mvp_cloud": "₹5K-20K (small instances, managed DB, basic CDN)",
+        "growth_cloud": "₹30K-80K (auto-scaling, caching, monitoring)",
+        "scale_cloud": "₹1L-5L (multi-region, high availability, enterprise monitoring)"
+      },
+      
+      // 16-20: Testing & QA
+      "qa_testing_cost": {
+        "manual_testing": "₹1-2L (dedicated QA for MVP)",
+        "automated_testing": "₹2-4L (test suite development + maintenance)",
+        "performance_testing": "₹50K-1.5L (load testing, optimization)",
+        "security_testing": "₹1-3L (pen testing, vulnerability assessment)"
+      },
+      
+      // 21-28: Additional Factors
+      "additional_factors": {
+        "admin_panel": "None (₹0) | Basic (₹1-2L) | Full CMS (₹3-6L)",
+        "analytics_reporting": "Basic GA (₹0) | Custom dashboards (₹1-3L) | BI integration (₹3-6L)",
+        "notifications": "Email only (₹20K) | Push + SMS (₹50K-1L) | Full omnichannel (₹1-2L)",
+        "localization": "Single language (₹0) | Multi-language (₹50K-2L based on languages)",
+        "content_creation": "Basic (₹0) | Professional copy/images (₹50K-2L)",
+        "documentation": "Minimal (₹0) | API docs (₹50K) | Full technical docs (₹1-2L)",
+        "devops_cicd": "Basic (₹30K) | Full CI/CD + monitoring (₹1-2L)",
+        "timeline_pressure": "Normal timeline (1x) | Accelerated (1.3x cost) | Rush (1.5x cost)"
+      }
+    },
 
+    // ========================================
+    // 💰 COST CALCULATION FORMULA
+    // ========================================
+    "cost_formula": {
+      "base_development": "SUM of: (Features × Complexity × Rate) + UI/UX + Integrations + Security",
+      "team_cost": "Team Size × Average Salary × Duration in months",
+      "infrastructure_first_year": "Monthly infra × 12 + setup costs",
+      "buffer": "20% of total for contingencies",
+      "total": "base_development + team_cost + infrastructure + buffer"
+    },
+
+    // ========================================
+    // 💵 DEVELOPMENT PHASE COSTS (DETAILED)
+    // ========================================
     "development_phase_cost_inr": {
-      // MVP Phase: Calculate as (Team × Salary × Duration) + Infrastructure + Tools + Buffer
-      // Use feature count and complexity to determine team size and duration
-      "mvp": "CALCULATE REALISTICALLY: IF features <= 15 THEN simpler_mvp(₹8L-₹15L), IF features 15-25 THEN standard_mvp(₹15L-₹30L), IF features >25 THEN complex_mvp(₹30L-₹50L). Formula: TeamSize(3-6) × AvgSalary(₹80K-₹120K) × Duration(2-4months) + Infra(₹30K-₹50K) + Buffer(20%). Output ONLY the final number in INR",
-
-      // Growth Phase: 1.5-2x MVP cost for feature expansion
-      "growth": "Scale MVP cost by 1.7x factor for feature expansion and team scaling. Add costs for: advanced features, performance optimization, marketing integration, analytics setup",
-
-      // Scale Phase: 2.5-3x MVP cost for enterprise features
-      "scale": "Scale MVP cost by 2.8x factor for enterprise features, scalability engineering, security hardening, compliance features, international expansion prep"
+      "mvp": {
+        "calculation_method": "Analyze feature_system for core features, estimate 3-4 developers for 3-4 months",
+        "team_breakdown": {
+          "senior_developer": "1 × ₹1.5L × 4 months = ₹6L",
+          "mid_developers": "2 × ₹80K × 4 months = ₹6.4L",
+          "ui_designer": "1 × ₹70K × 2 months = ₹1.4L",
+          "qa_engineer": "1 × ₹50K × 2 months = ₹1L"
+        },
+        "infrastructure_tools": "₹1-2L for cloud + tools",
+        "total_mvp_estimate": "₹15L-₹25L for standard MVP, scale based on feature count",
+        "assumptions": "List specific assumptions made for this estimate"
+      },
+      "growth": {
+        "multiplier": "1.5-2x MVP cost",
+        "additional_work": "Advanced features, optimizations, analytics, expanded team",
+        "timeline": "4-6 months post-MVP",
+        "estimate": "₹20L-₹50L additional"
+      },
+      "scale": {
+        "multiplier": "2-3x MVP cost", 
+        "additional_work": "Enterprise features, multi-region, compliance, security hardening",
+        "timeline": "6-12 months",
+        "estimate": "₹40L-₹1Cr additional"
+      }
     },
+    
+    // ========================================
+    // 📊 MONTHLY OPERATIONAL COSTS (POST-LAUNCH)
+    // ========================================
     "operational_costs_monthly_inr": {
-      // Post-launch monthly operational costs
-      "team": "CALCULATE: Reduced team size post-launch. IF MVP_cost <= ₹15L THEN ₹2.5L-₹4L, IF MVP_cost ₹15L-₹30L THEN ₹4L-₹7L, IF MVP_cost > ₹30L THEN ₹7L-₹12L. Include: 1-2 developers, 1 product person, part-time designer",
-
-      "infrastructure": "AWS/GCP India costs. IF MVP THEN ₹15K-₹30K, IF Growth THEN ₹40K-₹80K, IF Scale THEN ₹80K-₹200K. Include: servers, database, CDN, monitoring, backup, security services",
-
-      "marketing": "Digital marketing budget for Indian market. Startup: ₹50K-₹150K, Growth: ₹150K-₹400K, Scale: ₹400K-₹1L. Include: Google/Facebook ads, content marketing, PR, events",
-
-      "others": "Legal, accounting, office, SaaS tools, miscellaneous. Base: ₹25K-₹50K, add ₹10K-₹20K for each complexity level"
+      "team": {
+        "lean": "₹2L-₹4L (1-2 devs part-time maintenance)",
+        "standard": "₹4L-₹8L (2-3 full-time devs + support)",
+        "growth": "₹8L-₹15L (full product team)"
+      },
+      "infrastructure": {
+        "mvp_users": "₹15K-₹40K (1K-10K users)",
+        "growth_users": "₹50K-₹1.5L (10K-100K users)", 
+        "scale_users": "₹2L-₹5L (100K+ users)"
+      },
+      "third_party_services": {
+        "payment_gateway_fees": "2-3% of transactions",
+        "ai_api_costs": "₹5K-₹50K based on usage",
+        "email_sms": "₹5K-₹20K based on volume",
+        "monitoring_analytics": "₹10K-₹30K"
+      },
+      "marketing": {
+        "minimal": "₹30K-₹80K (organic focus)",
+        "moderate": "₹1L-₹3L (paid + content)",
+        "aggressive": "₹3L-₹10L (full marketing)"
+      },
+      "miscellaneous": "₹25K-₹75K (legal, accounting, tools, office)"
     },
-
-    // TOTAL CALCULATION: Development + (Operations × 12 months) + Emergency buffer
-    "total_first_year_cost_inr": "SUM: development_phase_cost + (monthly_operational × 12) + emergency_buffer(15%). Present final number in lakhs/crores format (e.g., ₹1.2Cr or ₹85L)",
-
-    "break_even_analysis": "DETAILED analysis (200-300 words) based on realistic Indian market conditions. Include: Customer Acquisition Cost (₹500-₹5000 typical), Average Revenue Per User, Pricing strategy for Indian market (₹500-₹5000/month for B2B, ₹50-₹500/month for B2C), market penetration assumptions, when break-even occurs (typically 12-18 months for SaaS)",
-
-    "funding_requirements": "DETAILED funding strategy (200-300 words) for Indian startup ecosystem. Include: Total runway needed (18-24 months), recommended funding amounts (Seed: ₹1-5Cr, Series A: ₹10-50Cr), burn rate analysis, investor expectations, milestone-based funding approach",
 
     // ========================================
-    // SCENARIO-BASED BUDGETING (REQUIRED)
+    // 📈 TOTAL FIRST YEAR COST
+    // ========================================
+    "total_first_year_cost_inr": {
+      "calculation": "MVP dev + Growth dev portion + (Monthly ops × 12) + Buffer",
+      "lean_estimate": "₹20L-₹40L (bootstrap, minimal team)",
+      "standard_estimate": "₹50L-₹1.2Cr (seed-funded, proper team)",
+      "scale_estimate": "₹1.5Cr-₹4Cr (Series A, aggressive growth)",
+      "explain_which_applies": "Based on project complexity and team requirements"
+    },
+
+    // ========================================
+    // 💼 SCENARIO-BASED BUDGETS (REQUIRED)
     // ========================================
     "budget_scenarios": {
       "lean_startup": {
-        // Bootstrap/Pre-seed approach
-        "total_cost_inr": "CALCULATE: Minimal viable budget for 2-3 person core team. Formula: 2-3 people × ₹60K average × 8 months + minimal infra ₹12K/month × 12 + basic tools ₹15K + 15% buffer. Target: ₹8L-₹18L range",
-        "runway_months": "12-18 months with very lean operations",
-        "team_size": "2-3 (founder + 1-2 developers/interns)",
-        "description": "Bootstrap phase with founder taking no salary, using interns/junior developers, minimal infrastructure, working from home/coworking spaces"
+        "total_cost_inr": "CALCULATE based on: 2-3 person team, 8-12 months, minimal infra",
+        "monthly_burn": "₹2L-₹4L",
+        "runway_months": 12,
+        "team_size": "2-3",
+        "description": "Bootstrap mode: founder + junior dev(s), minimal marketing, home/coworking office",
+        "tradeoffs": "Slower development, limited features, founder doing multiple roles"
       },
       "standard_startup": {
-        // Seed funded approach
-        "total_cost_inr": "CALCULATE: Standard funded startup budget. Formula: 4-7 people × ₹90K average × 12 months + standard infra ₹40K/month × 12 + marketing ₹100K/month × 12 + office ₹30K/month × 12 + 20% buffer. Target: ₹60L-₹1.5Cr range",
-        "runway_months": "18-24 months",
-        "team_size": "4-7 (developers, designer, product manager)",
-        "description": "Seed-funded startup with proper salaries, dedicated office, standard development tools, moderate marketing budget"
+        "total_cost_inr": "CALCULATE based on: 5-8 person team, proper salaries, 12-18 months",
+        "monthly_burn": "₹6L-₹12L",
+        "runway_months": 18,
+        "team_size": "5-8",
+        "description": "Seed-funded: full dev team, dedicated designer, proper infrastructure",
+        "ideal_funding": "₹1-2Cr seed round"
       },
       "well_funded": {
-        // Series A level approach
-        "total_cost_inr": "CALCULATE: Well-funded growth approach. Formula: 8-15 people × ₹120K average × 18 months + premium infra ₹120K/month × 18 + aggressive marketing ₹300K/month × 18 + premium office ₹80K/month × 18 + 25% buffer. Target: ₹2.5Cr-₹6Cr range",
-        "runway_months": "24-30 months",
-        "team_size": "8-15 (full cross-functional team with specialists)",
-        "description": "Series A funded with premium salaries, full team including sales/marketing, premium infrastructure, aggressive growth strategy"
+        "total_cost_inr": "CALCULATE based on: 12-20 person team, senior hires, aggressive timeline",
+        "monthly_burn": "₹15L-₹35L",
+        "runway_months": 24,
+        "team_size": "12-20",
+        "description": "Series A: full cross-functional team, aggressive marketing, premium everything",
+        "ideal_funding": "₹10-25Cr Series A"
       }
+    },
+
+    // ========================================
+    // 📊 BREAK-EVEN ANALYSIS
+    // ========================================
+    "break_even_analysis": {
+      "customer_acquisition_cost": "₹500-₹5000 for B2B, ₹50-₹500 for B2C in India",
+      "average_revenue_per_user": "CALCULATE based on pricing strategy",
+      "months_to_break_even": "12-24 months typical for SaaS",
+      "required_paying_customers": "CALCULATE: Monthly burn / ARPU",
+      "detailed_analysis": "300-400 word analysis of path to profitability"
+    },
+
+    // ========================================
+    // 🎯 FUNDING REQUIREMENTS
+    // ========================================
+    "funding_requirements": {
+      "seed_round": "₹1-5Cr for 18-24 month runway to achieve PMF",
+      "series_a": "₹10-50Cr for scaling after PMF proven",
+      "recommended_approach": "Detailed 300-word funding strategy specific to this project"
     }
   },
 
