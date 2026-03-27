@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -29,15 +29,45 @@ interface PremiumSidebarProps {
 }
 
 export default function PremiumSidebar({ projectCount, analysisCount = 0 }: PremiumSidebarProps) {
-  const [collapsed, setCollapsed] = useState(false)
+  const [collapsed, setCollapsed] = useState(true) // Start collapsed
+  const [isHovering, setIsHovering] = useState(false)
   const [hoveredItem, setHoveredItem] = useState<string | null>(null)
   const [isDark, setIsDark] = useState(false)
+  const [manuallyCollapsed, setManuallyCollapsed] = useState(false)
   const pathname = usePathname()
 
   // Check theme on mount
   useEffect(() => {
     setIsDark(document.documentElement.classList.contains('dark'))
   }, [])
+
+  // Handle auto-expand on hover (only if not manually collapsed)
+  const handleMouseEnter = useCallback(() => {
+    setIsHovering(true)
+    if (!manuallyCollapsed) {
+      setCollapsed(false)
+    }
+  }, [manuallyCollapsed])
+
+  const handleMouseLeave = useCallback(() => {
+    setIsHovering(false)
+    if (!manuallyCollapsed) {
+      setCollapsed(true)
+    }
+  }, [manuallyCollapsed])
+
+  // Toggle manual collapse
+  const toggleCollapse = () => {
+    if (manuallyCollapsed) {
+      // If manually collapsed, expand and disable manual mode
+      setManuallyCollapsed(false)
+      setCollapsed(!isHovering) // Collapse only if not hovering
+    } else {
+      // Toggle and enable manual mode
+      setManuallyCollapsed(!collapsed)
+      setCollapsed(!collapsed)
+    }
+  }
 
   const toggleTheme = () => {
     document.documentElement.classList.toggle('dark')
@@ -93,11 +123,16 @@ export default function PremiumSidebar({ projectCount, analysisCount = 0 }: Prem
 
   const isActive = (href: string) => pathname === href
 
+  // Sidebar width based on state
+  const sidebarWidth = collapsed ? 80 : 280
+
   return (
     <motion.aside
       initial={false}
-      animate={{ width: collapsed ? 80 : 280 }}
+      animate={{ width: sidebarWidth }}
       transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
       className="h-screen flex flex-col sticky top-0 z-40
         bg-gradient-to-b from-gray-900 via-gray-900 to-gray-950
         border-r border-gray-800/50"
@@ -152,33 +187,30 @@ export default function PremiumSidebar({ projectCount, analysisCount = 0 }: Prem
               onMouseEnter={() => setHoveredItem(item.name)}
               onMouseLeave={() => setHoveredItem(null)}
               className={`relative flex items-center gap-4 px-4 py-3.5 rounded-xl
-                transition-all duration-300 group
+                transition-all duration-200 group
                 ${item.soon ? 'cursor-not-allowed' : 'cursor-pointer'}
                 ${isItemActive
                   ? 'bg-white/10 text-white shadow-lg'
-                  : 'text-gray-400 hover:text-white hover:bg-white/5'
-                }`}
+                  : 'text-gray-400 hover:text-white'
+                }
+                ${!isItemActive && !item.soon ? 'hover:bg-white/5' : ''}`}
             >
-              {/* Active/Hover Indicator */}
-              <AnimatePresence>
-                {(isItemActive || isHovered) && !item.soon && (
-                  <motion.div
-                    initial={{ opacity: 0, scale: 0.8 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.8 }}
-                    className={`absolute inset-0 rounded-xl bg-gradient-to-r ${item.gradient} opacity-10`}
-                  />
-                )}
-              </AnimatePresence>
+              {/* Active Indicator Bar */}
+              {isItemActive && (
+                <motion.div
+                  layoutId="activeIndicator"
+                  className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-gradient-to-b from-blue-500 to-purple-500 rounded-r-full"
+                />
+              )}
 
               {/* Icon with gradient background on active */}
               <div className={`relative w-10 h-10 rounded-xl flex items-center justify-center
-                flex-shrink-0 transition-all duration-300
+                flex-shrink-0 transition-all duration-200
                 ${isItemActive
                   ? `bg-gradient-to-br ${item.gradient} shadow-lg`
                   : item.soon
                     ? 'bg-gray-800/50'
-                    : 'bg-gray-800/80 group-hover:bg-gray-800'
+                    : 'bg-gray-800/80 group-hover:bg-gray-700/80'
                 }`}
               >
                 <item.icon className={`w-5 h-5 ${isItemActive ? 'text-white' : ''}`} />
@@ -191,6 +223,7 @@ export default function PremiumSidebar({ projectCount, analysisCount = 0 }: Prem
                     initial={{ opacity: 0, x: -10 }}
                     animate={{ opacity: 1, x: 0 }}
                     exit={{ opacity: 0, x: -10 }}
+                    transition={{ duration: 0.15 }}
                     className="flex-1 flex items-center justify-between min-w-0"
                   >
                     <span className={`font-medium truncate
@@ -239,13 +272,14 @@ export default function PremiumSidebar({ projectCount, analysisCount = 0 }: Prem
             href={item.href || '#'}
             onClick={item.soon ? (e) => e.preventDefault() : undefined}
             className={`flex items-center gap-4 px-4 py-3 rounded-xl
-              text-gray-400 hover:text-white hover:bg-white/5
+              text-gray-400 hover:text-white
               transition-all duration-200 group
+              ${!item.soon ? 'hover:bg-white/5' : ''}
               ${item.soon ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
             <div className="w-9 h-9 rounded-lg bg-gray-800/50 flex items-center justify-center
-              group-hover:bg-gray-800 transition-colors flex-shrink-0">
-              <item.icon className="w-4.5 h-4.5" />
+              group-hover:bg-gray-700/80 transition-colors flex-shrink-0">
+              <item.icon className="w-4 h-4" />
             </div>
             <AnimatePresence mode="wait">
               {!collapsed && (
@@ -253,6 +287,7 @@ export default function PremiumSidebar({ projectCount, analysisCount = 0 }: Prem
                   initial={{ opacity: 0, x: -10 }}
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: -10 }}
+                  transition={{ duration: 0.15 }}
                   className="font-medium text-sm"
                 >
                   {item.name}
@@ -270,8 +305,8 @@ export default function PremiumSidebar({ projectCount, analysisCount = 0 }: Prem
             transition-all duration-200 group"
         >
           <div className="w-9 h-9 rounded-lg bg-gray-800/50 flex items-center justify-center
-            group-hover:bg-gray-800 transition-colors flex-shrink-0">
-            {isDark ? <Sun className="w-4.5 h-4.5" /> : <Moon className="w-4.5 h-4.5" />}
+            group-hover:bg-gray-700/80 transition-colors flex-shrink-0">
+            {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           </div>
           <AnimatePresence mode="wait">
             {!collapsed && (
@@ -279,6 +314,7 @@ export default function PremiumSidebar({ projectCount, analysisCount = 0 }: Prem
                 initial={{ opacity: 0, x: -10 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -10 }}
+                transition={{ duration: 0.15 }}
                 className="font-medium text-sm"
               >
                 {isDark ? 'Light Mode' : 'Dark Mode'}
@@ -289,17 +325,17 @@ export default function PremiumSidebar({ projectCount, analysisCount = 0 }: Prem
 
         {/* Collapse Toggle */}
         <button
-          onClick={() => setCollapsed(!collapsed)}
+          onClick={toggleCollapse}
           className="w-full flex items-center gap-4 px-4 py-3 rounded-xl
             text-gray-400 hover:text-white hover:bg-white/5
             transition-all duration-200 group"
         >
           <div className="w-9 h-9 rounded-lg bg-gray-800/50 flex items-center justify-center
-            group-hover:bg-gray-800 transition-colors flex-shrink-0">
+            group-hover:bg-gray-700/80 transition-colors flex-shrink-0">
             {collapsed ? (
-              <ChevronRight className="w-4.5 h-4.5" />
+              <ChevronRight className="w-4 h-4" />
             ) : (
-              <ChevronLeft className="w-4.5 h-4.5" />
+              <ChevronLeft className="w-4 h-4" />
             )}
           </div>
           <AnimatePresence mode="wait">
@@ -308,9 +344,10 @@ export default function PremiumSidebar({ projectCount, analysisCount = 0 }: Prem
                 initial={{ opacity: 0, x: -10 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -10 }}
+                transition={{ duration: 0.15 }}
                 className="font-medium text-sm"
               >
-                Collapse
+                {manuallyCollapsed ? 'Expand' : 'Collapse'}
               </motion.span>
             )}
           </AnimatePresence>

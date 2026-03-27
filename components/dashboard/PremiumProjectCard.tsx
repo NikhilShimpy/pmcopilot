@@ -18,6 +18,7 @@ import {
   Share2,
   Star,
   StarOff,
+  AlertTriangle,
 } from 'lucide-react'
 import type { Project } from '@/types'
 
@@ -32,6 +33,7 @@ export default function PremiumProjectCard({ project, onDelete, index }: Premium
   const [isDeleting, setIsDeleting] = useState(false)
   const [isHovered, setIsHovered] = useState(false)
   const [isFavorite, setIsFavorite] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString)
@@ -49,12 +51,19 @@ export default function PremiumProjectCard({ project, onDelete, index }: Premium
     })
   }
 
-  const handleDelete = async () => {
-    if (confirm(`Are you sure you want to delete "${project.name}"? This action cannot be undone.`)) {
-      setIsDeleting(true)
-      await onDelete(project.id)
-    }
+  const handleDeleteClick = () => {
     setShowMenu(false)
+    setShowDeleteConfirm(true)
+  }
+
+  const handleDeleteConfirm = async () => {
+    setIsDeleting(true)
+    setShowDeleteConfirm(false)
+    await onDelete(project.id)
+  }
+
+  const handleDeleteCancel = () => {
+    setShowDeleteConfirm(false)
   }
 
   // Generate gradient based on project name hash
@@ -74,6 +83,7 @@ export default function PremiumProjectCard({ project, onDelete, index }: Premium
   const gradient = getGradient()
 
   return (
+    <>
     <motion.div
       initial={{ opacity: 0, y: 30 }}
       animate={{ opacity: 1, y: 0 }}
@@ -86,9 +96,9 @@ export default function PremiumProjectCard({ project, onDelete, index }: Premium
       onMouseLeave={() => setIsHovered(false)}
       className={`group relative overflow-hidden
         bg-white dark:bg-gray-900
-        rounded-2xl border border-gray-200 dark:border-gray-800
-        hover:border-gray-300 dark:hover:border-gray-700
-        transition-all duration-500
+        rounded-2xl border border-gray-200/80 dark:border-gray-800/80
+        transition-all duration-300 ease-out
+        ${isHovered ? 'shadow-xl shadow-gray-200/50 dark:shadow-gray-900/50 border-gray-300 dark:border-gray-700 -translate-y-1' : 'shadow-sm'}
         ${isDeleting ? 'opacity-50 pointer-events-none' : ''}`}
     >
       {/* Top Gradient Bar */}
@@ -188,7 +198,7 @@ export default function PremiumProjectCard({ project, onDelete, index }: Premium
                         </button>
                         <div className="h-px bg-gray-200 dark:bg-gray-700 my-1" />
                         <button
-                          onClick={handleDelete}
+                          onClick={handleDeleteClick}
                           className="w-full flex items-center gap-3 px-4 py-3 rounded-lg
                             text-sm text-red-600 dark:text-red-400
                             hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
@@ -207,8 +217,6 @@ export default function PremiumProjectCard({ project, onDelete, index }: Premium
 
         {/* Project Name */}
         <h3 className="font-bold text-xl text-gray-900 dark:text-white mb-2 line-clamp-1
-          group-hover:text-transparent group-hover:bg-clip-text
-          group-hover:bg-gradient-to-r group-hover:from-blue-600 group-hover:to-purple-600
           transition-all duration-300">
           {project.name}
         </h3>
@@ -251,7 +259,7 @@ export default function PremiumProjectCard({ project, onDelete, index }: Premium
       </div>
 
       {/* Footer with CTA */}
-      <div className="px-6 py-4 bg-gray-50 dark:bg-gray-800/50 border-t border-gray-100 dark:border-gray-800">
+      <div className="px-6 py-4 bg-gray-50/80 dark:bg-gray-800/30 border-t border-gray-100 dark:border-gray-800">
         <Link
           href={`/project/${project.id}`}
           className="flex items-center justify-center gap-2 w-full py-3 rounded-xl
@@ -272,27 +280,75 @@ export default function PremiumProjectCard({ project, onDelete, index }: Premium
         </Link>
       </div>
 
-      {/* Hover Glow Effect */}
+      {/* Subtle Hover Glow Effect - FIXED: Very low opacity */}
       <motion.div
         initial={{ opacity: 0 }}
-        animate={{ opacity: isHovered ? 1 : 0 }}
+        animate={{ opacity: isHovered ? 0.02 : 0 }}
         className={`absolute inset-0 rounded-2xl pointer-events-none
-          bg-gradient-to-br ${gradient} opacity-[0.03]`}
+          bg-gradient-to-br ${gradient}`}
       />
 
-      {/* Corner Shine Effect */}
-      <motion.div
-        initial={{ opacity: 0, x: -100, y: 100 }}
-        animate={{
-          opacity: isHovered ? 0.5 : 0,
-          x: isHovered ? 100 : -100,
-          y: isHovered ? -100 : 100
-        }}
-        transition={{ duration: 0.6 }}
-        className="absolute w-32 h-32 rounded-full
-          bg-gradient-to-br from-white to-transparent
-          blur-2xl pointer-events-none"
+      {/* Subtle Border Glow on Hover */}
+      <div className={`absolute inset-0 rounded-2xl pointer-events-none transition-opacity duration-300
+        ${isHovered ? 'opacity-100' : 'opacity-0'}
+        ring-1 ring-inset ring-gray-200/50 dark:ring-gray-700/50`}
       />
     </motion.div>
+
+    {/* Delete Confirmation Modal */}
+    <AnimatePresence>
+      {showDeleteConfirm && (
+        <>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50"
+            onClick={handleDeleteCancel}
+          />
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50
+              w-full max-w-md p-6 bg-white dark:bg-gray-900 rounded-2xl shadow-2xl
+              border border-gray-200 dark:border-gray-800"
+          >
+            <div className="flex items-center gap-4 mb-4">
+              <div className="w-12 h-12 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
+                <AlertTriangle className="w-6 h-6 text-red-600 dark:text-red-400" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white">Delete Project</h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400">This action cannot be undone</p>
+              </div>
+            </div>
+            <p className="text-gray-600 dark:text-gray-300 mb-6">
+              Are you sure you want to delete <span className="font-semibold">"{project.name}"</span>?
+              All associated data and analyses will be permanently removed.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={handleDeleteCancel}
+                className="flex-1 px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700
+                  text-gray-700 dark:text-gray-300 font-medium
+                  hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteConfirm}
+                className="flex-1 px-4 py-3 rounded-xl bg-red-600 text-white font-medium
+                  hover:bg-red-700 transition-colors flex items-center justify-center gap-2"
+              >
+                <Trash2 className="w-4 h-4" />
+                Delete Project
+              </button>
+            </div>
+          </motion.div>
+        </>
+      )}
+    </AnimatePresence>
+    </>
   )
 }
