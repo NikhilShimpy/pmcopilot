@@ -44,8 +44,8 @@ const PUTER_CONFIG = {
     ALT_CHAT: 'https://puter.com/api/ai/chat',
   },
   DRIVER: 'ai-chat',
-  DEFAULT_MODEL: AI_CONFIG.PUTER.DEFAULT_MODEL,
-  TIMEOUT: AI_CONFIG.PUTER.TIMEOUT,
+  DEFAULT_MODEL: 'gpt-4o-mini', // Fallback model
+  TIMEOUT: 30000,
 };
 
 // ============================================
@@ -247,7 +247,7 @@ export async function loadPuterScript(): Promise<any> {
 
   return new Promise((resolve, reject) => {
     const script = document.createElement('script');
-    script.src = AI_CONFIG.PUTER.SCRIPT_URL;
+    script.src = 'https://js.puter.com/v2/'; // Puter.js SDK URL
     script.async = true;
 
     const timeout = setTimeout(() => {

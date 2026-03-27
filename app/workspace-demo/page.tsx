@@ -194,5 +194,19 @@ export default function WorkspaceDemoPage() {
     ]
   }
 
-  return <WorkspaceLayout project={mockProject} analysisResult={mockAnalysis} />
+  // Temporarily disabled - needs update to match new ComprehensiveStrategyResult type
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950">
+      <div className="text-center">
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
+          Workspace Demo
+        </h1>
+        <p className="text-gray-500 dark:text-gray-400">
+          This demo page is being updated. Please use the main application flow.
+        </p>
+      </div>
+    </div>
+  )
+
+  // return <WorkspaceLayout project={mockProject} analysisResult={mockAnalysis} />
 }

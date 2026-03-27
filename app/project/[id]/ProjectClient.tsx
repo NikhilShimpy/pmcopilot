@@ -1,21 +1,33 @@
+/**
+ * ProjectClient - Chat-First Project Workspace
+ *
+ * FIXED VERSION:
+ * - Uses new ChatFirstLayout instead of old ChatGPTLayout
+ * - Connects analyze flow to chat messages
+ * - Uses chatFirstStore for state management
+ */
+
 'use client'
 
-import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { motion } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import {
   ArrowLeft,
   Edit2,
   Trash2,
   Sparkles,
   Loader2,
+  Settings,
+  Share2,
+  Download,
 } from 'lucide-react'
 import { useToast } from '@/components/ui/Toast'
 import { createClientSupabaseClient } from '@/lib/supabase/client'
-import { ChatGPTLayout } from '@/components/workspace/ChatGPTLayout'
+import { ChatFirstLayout, DragDropProvider } from '@/components/chat-first'
 import { AnalysisProgressIndicator } from '@/components/AnalysisProgressIndicator'
-import { useWorkspaceStore } from '@/stores/workspaceStore'
+import { useChatFirstStore } from '@/stores/chatFirstStore'
 import type { Project } from '@/types'
 import type { ComprehensiveStrategyResult } from '@/types/comprehensive-strategy'
 
@@ -33,39 +45,219 @@ export default function ProjectClient({ project: initialProject, user }: Project
   const [project, setProject] = useState(initialProject)
   const [isEditing, setIsEditing] = useState(false)
   const [editName, setEditName] = useState(project.name)
-  const [editDescription, setEditDescription] = useState(project.description || '')
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
-  const [feedbackInput, setFeedbackInput] = useState('')
-  const [analyzing, setAnalyzing] = useState(false)
-  const [analysisResult, setAnalysisResult] = useState<ComprehensiveStrategyResult | null>(null)
   const [loadingAnalysis, setLoadingAnalysis] = useState(true)
+  const [hasExistingAnalysis, setHasExistingAnalysis] = useState(false)
 
-  // Store selectors
-  const setStoreProject = useWorkspaceStore((state) => state.setProject)
+  // Chat-First Store - CRITICAL: This connects to the new UI
+  const {
+    setProject: setStoreProject,
+    addMessage,
+    setStreamingPhase,
+    setThinkingMessage,
+    setError,
+    clearMessages,
+  } = useChatFirstStore()
 
   // Track if we've already set the project
   const hasSetProjectRef = useRef(false)
+
+  // Helper: Convert analysis result to chat message
+  // Using 'any' type for flexible access since AI response structure can vary
+  const convertAnalysisToChat = useCallback((result: ComprehensiveStrategyResult) => {
+    const problems = (result.problem_analysis || []) as any[]
+    const features = (result.feature_system || []) as any[]
+    const tasks = (result.development_tasks || []) as any[]
+    const costEstimation = result.cost_estimation as any
+    const timeEstimation = result.time_estimation as any
+    const prd = result.prd
+
+    let content = `# Analysis Complete
+
+I've analyzed your product and generated a comprehensive strategy.
+
+## Executive Summary
+${result.executive_dashboard?.idea_expansion || 'Your product idea has been analyzed and broken down into actionable components.'}
+
+---
+
+## Problems Identified (${problems.length})
+
+`
+
+    // Add top 5 problems
+    problems.slice(0, 5).forEach((problem: any, i: number) => {
+      const title = problem.title || problem.name || 'Problem'
+      const severity = problem.severity_score ?? problem.severity ?? 'N/A'
+      const frequency = problem.frequency_score ?? problem.frequency ?? 'N/A'
+      const description = problem.deep_description || problem.description || 'No description'
+
+      content += `### ${i + 1}. ${title}
+- **Severity:** ${severity}/10
+- **Frequency:** ${frequency}
+- **Description:** ${description}
+${problem.root_cause ? `- **Root Cause:** ${problem.root_cause}` : ''}
+
+`
+    })
+
+    if (problems.length > 5) {
+      content += `*...and ${problems.length - 5} more problems identified*\n\n`
+    }
+
+    content += `---
+
+## Recommended Features (${features.length})
+
+`
+
+    // Add top 5 features
+    features.slice(0, 5).forEach((feature: any, i: number) => {
+      const name = feature.name || feature.title || 'Feature'
+      const whyNeeded = feature.why_needed || feature.detailed_description || ''
+
+      content += `### ${i + 1}. ${name}
+- **Category:** ${feature.category || 'General'}
+- **Complexity:** ${feature.complexity || 'Medium'}
+- **Business Value:** ${feature.business_value || 'High'}
+${whyNeeded ? `- **Why Needed:** ${whyNeeded}` : ''}
+
+`
+    })
+
+    if (features.length > 5) {
+      content += `*...and ${features.length - 5} more features suggested*\n\n`
+    }
+
+    // Add cost estimation if available
+    if (costEstimation) {
+      content += `---
+
+## Cost Estimation (INR)
+
+| Category | Cost |
+|----------|------|
+`
+      // Use the budget versions from the actual type
+      if (costEstimation.low_budget_version) {
+        content += `| Low Budget | ₹${(costEstimation.low_budget_version.annual_cost / 100000).toFixed(1)}L/year |\n`
+      }
+      if (costEstimation.startup_version) {
+        content += `| Startup | ₹${(costEstimation.startup_version.annual_cost / 100000).toFixed(1)}L/year |\n`
+      }
+      if (costEstimation.scale_version) {
+        content += `| Scale | ₹${(costEstimation.scale_version.annual_cost / 100000).toFixed(1)}L/year |\n`
+      }
+
+      // Fallback display
+      if (!costEstimation.low_budget_version && !costEstimation.startup_version) {
+        content += `| Development | ₹${((costEstimation.development_cost || 2500000) / 100000).toFixed(1)}L |\n`
+        content += `| Cloud Infrastructure | ₹${((costEstimation.cloud_cost || 180000) / 100000).toFixed(1)}L/year |\n`
+        content += `| AI APIs | ₹${((costEstimation.ai_api_cost || 120000) / 100000).toFixed(1)}L/year |\n`
+      }
+
+      const totalCost = costEstimation.total_first_year || costEstimation.development_cost || 0
+      content += `
+**Total First Year:** ₹${(totalCost / 100000).toFixed(1)}L
+
+`
+    }
+
+    // Add timeline if available
+    if (timeEstimation) {
+      content += `---
+
+## Timeline
+
+**Total Duration:** ${timeEstimation.total_weeks || 12} weeks
+
+| Milestone | Target Week | Deliverables |
+|-----------|-------------|--------------|
+`
+      if (timeEstimation.milestones && timeEstimation.milestones.length > 0) {
+        timeEstimation.milestones.slice(0, 5).forEach((milestone: any) => {
+          const deliverables = milestone.deliverables?.slice(0, 2).join(', ') || 'TBD'
+          content += `| ${milestone.name} | Week ${milestone.target_week} | ${deliverables} |\n`
+        })
+      } else {
+        content += `| MVP | Week 8 | Core features |\n`
+        content += `| Beta | Week 12 | Full product |\n`
+      }
+      content += '\n'
+    }
+
+    // Add development tasks summary
+    content += `---
+
+## Development Tasks (${tasks.length})
+
+| Priority | Task | Estimate |
+|----------|------|----------|
+`
+    tasks.slice(0, 10).forEach((task: any) => {
+      const title = task.title || task.name || 'Task'
+      const estimate = task.estimated_time || task.estimate || 'TBD'
+      content += `| ${task.priority || 'Medium'} | ${title} | ${estimate} |\n`
+    })
+
+    if (tasks.length > 10) {
+      content += `\n*...and ${tasks.length - 10} more tasks*\n`
+    }
+
+    content += `
+
+---
+
+## What's Next?
+
+You can:
+- **Navigate sections** using the sidebar to see detailed breakdowns
+- **Ask me questions** like "Show me more problems" or "Explain the cost breakdown"
+- **Drag items** from sidebar to chat for detailed analysis
+- **Adjust response depth** using the length selector
+
+*Click any section in the sidebar to filter the view!*`
+
+    return content
+  }, [])
 
   // Fetch latest analysis on mount
   useEffect(() => {
     let mounted = true
 
     async function fetchLatestAnalysis() {
+      console.log('[ProjectClient] Fetching latest analysis for project:', project.id)
+
       try {
         const response = await fetch(`/api/analyze?project_id=${project.id}&limit=1`)
         const data = await response.json()
 
         if (!mounted) return
 
+        console.log('[ProjectClient] Fetch response:', { success: data.success, hasData: !!data.data })
+
         const analyses = data.analyses || data.data?.analyses || (Array.isArray(data.data) ? data.data : null)
 
         if (data.success && analyses && analyses.length > 0) {
           const latestAnalysis = analyses[0]
-          setAnalysisResult(latestAnalysis.result)
+          console.log('[ProjectClient] Found existing analysis:', latestAnalysis.id)
+
+          setHasExistingAnalysis(true)
+
+          // CRITICAL: Add analysis result to chat messages
+          if (latestAnalysis.result) {
+            const chatContent = convertAnalysisToChat(latestAnalysis.result)
+            addMessage({
+              role: 'assistant',
+              content: chatContent,
+            })
+          }
+        } else {
+          console.log('[ProjectClient] No existing analysis found')
         }
       } catch (error) {
-        console.error('Failed to fetch analysis:', error)
+        console.error('[ProjectClient] Failed to fetch analysis:', error)
       } finally {
         if (mounted) {
           setLoadingAnalysis(false)
@@ -77,6 +269,7 @@ export default function ProjectClient({ project: initialProject, user }: Project
     if (!hasSetProjectRef.current) {
       hasSetProjectRef.current = true
       setStoreProject(project.id, project.name)
+      console.log('[ProjectClient] Set project in store:', project.name)
     }
 
     fetchLatestAnalysis()
@@ -84,14 +277,7 @@ export default function ProjectClient({ project: initialProject, user }: Project
     return () => {
       mounted = false
     }
-  }, [project.id, project.name, setStoreProject])
-
-  // Memoize analysisResult to prevent unnecessary re-renders
-  const stableAnalysisResult = useMemo(() => analysisResult, [
-    analysisResult?.metadata?.analysis_id,
-    analysisResult?.problem_analysis?.length,
-    analysisResult?.feature_system?.length,
-  ])
+  }, [project.id, project.name, setStoreProject, addMessage, convertAnalysisToChat])
 
   const handleSave = async () => {
     if (!editName.trim()) {
@@ -106,7 +292,6 @@ export default function ProjectClient({ project: initialProject, user }: Project
         .from('projects')
         .update({
           name: editName.trim(),
-          description: editDescription.trim() || null,
           updated_at: new Date().toISOString(),
         })
         .eq('id', project.id)
@@ -117,6 +302,7 @@ export default function ProjectClient({ project: initialProject, user }: Project
       if (error) throw error
 
       setProject(data)
+      setStoreProject(data.id, data.name)
       setIsEditing(false)
       showToast('Project updated successfully', 'success')
     } catch {
@@ -127,7 +313,7 @@ export default function ProjectClient({ project: initialProject, user }: Project
   }
 
   const handleDelete = async () => {
-    if (!confirm(`Are you sure you want to delete "${project.name}"? This action cannot be undone.`)) {
+    if (!confirm(`Delete "${project.name}"? This cannot be undone.`)) {
       return
     }
 
@@ -142,7 +328,7 @@ export default function ProjectClient({ project: initialProject, user }: Project
 
       if (error) throw error
 
-      showToast('Project deleted successfully', 'success')
+      showToast('Project deleted', 'success')
       router.push('/dashboard')
     } catch {
       showToast('Failed to delete project', 'error')
@@ -150,271 +336,156 @@ export default function ProjectClient({ project: initialProject, user }: Project
     }
   }
 
-  const handleAnalyzeFeedback = async () => {
-    if (!feedbackInput.trim()) {
-      showToast('Please enter some feedback to analyze', 'warning')
-      return
-    }
-
-    if (feedbackInput.trim().length < 10) {
-      showToast('Feedback must be at least 10 characters long. Please provide a more detailed description.', 'warning')
-      return
-    }
-
-    if (feedbackInput.trim().length > 10000) {
-      showToast('Feedback is too long. Please keep it under 10,000 characters.', 'warning')
-      return
-    }
-
-    setAnalyzing(true)
-
-    try {
-      console.log('[Analysis] Starting analysis for project:', project.id)
-
-      const response = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          project_id: project.id,
-          feedback: feedbackInput,
-          detail_level: 'comprehensive',
-          context: {
-            project_name: project.name,
-            project_context: project.description,
-          },
-        }),
-      })
-
-      console.log('[Analysis] Response status:', response.status)
-
-      const data = await response.json()
-      console.log('[Analysis] Response data:', {
-        success: data.success,
-        hasData: !!data.data,
-        metadata: data.data?.metadata,
-        problemsCount: data.data?.problem_analysis?.length,
-        featuresCount: data.data?.feature_system?.length,
-        tasksCount: data.data?.development_tasks?.length,
-        provider: data.data?.provider || data.provider,
-      })
-
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || 'Analysis failed')
-      }
-
-      // Store the result
-      setAnalysisResult(data.data || data)
-      setFeedbackInput('')
-      showToast('Analysis completed successfully!', 'success')
-
-      console.log('[Analysis] Analysis result set successfully')
-    } catch (error) {
-      console.error('[Analysis] Error:', error)
-      showToast(
-        error instanceof Error ? error.message : 'Failed to analyze feedback',
-        'error'
-      )
-    } finally {
-      setAnalyzing(false)
-    }
-  }
-
-  // Show loading state
+  // Loading state
   if (loadingAnalysis) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-50">
-        <div className="text-center">
-          <Loader2 className="w-12 h-12 mx-auto mb-4 text-purple-600 animate-spin" />
-          <p className="text-slate-600 font-medium">Loading workspace...</p>
-        </div>
+      <div className="h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-950">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="text-center"
+        >
+          <motion.div
+            animate={{ rotate: 360 }}
+            transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
+            className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center shadow-xl shadow-blue-500/30"
+          >
+            <Sparkles className="w-8 h-8 text-white" />
+          </motion.div>
+          <p className="text-gray-600 dark:text-gray-400 font-medium">
+            Loading workspace...
+          </p>
+        </motion.div>
       </div>
     )
   }
 
-  // WORKSPACE VIEW ONLY - No Classic View
+  // MAIN RENDER: Chat-First Layout
   return (
-    <div className="h-screen flex flex-col bg-gray-50">
-      {/* Real-time Analysis Progress Indicator */}
-      <AnalysisProgressIndicator
-        isAnalyzing={analyzing}
-        onComplete={() => {}}
-      />
+    <DragDropProvider>
+      <ChatFirstLayout
+        projectId={project.id}
+        projectName={project.name}
+      >
+        {/* Header Actions */}
+        <div className="flex items-center gap-2">
+          <Link
+            href="/dashboard"
+            className="flex items-center gap-2 px-3 py-2 rounded-lg
+              text-gray-600 dark:text-gray-300
+              hover:bg-gray-100 dark:hover:bg-gray-800
+              transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span className="hidden sm:inline text-sm">Dashboard</span>
+          </Link>
 
-      {/* Header */}
-      <header className="bg-white border-b border-slate-200 z-50">
-        <div className="px-6 py-4">
-          <div className="flex items-center justify-between">
-            <Link
-              href="/dashboard"
-              className="flex items-center gap-2 text-slate-600 hover:text-slate-900 transition-colors"
+          <div className="h-6 w-px bg-gray-200 dark:bg-gray-700" />
+
+          <button
+            onClick={() => setIsEditing(!isEditing)}
+            className="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200
+              hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            title="Edit project"
+          >
+            <Edit2 className="w-4 h-4" />
+          </button>
+
+          <button
+            className="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200
+              hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            title="Share"
+          >
+            <Share2 className="w-4 h-4" />
+          </button>
+
+          <button
+            className="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200
+              hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            title="Export"
+          >
+            <Download className="w-4 h-4" />
+          </button>
+
+          <button
+            onClick={handleDelete}
+            disabled={deleting}
+            className="p-2 rounded-lg text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300
+              hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors disabled:opacity-50"
+            title="Delete project"
+          >
+            {deleting ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Trash2 className="w-4 h-4" />
+            )}
+          </button>
+        </div>
+      </ChatFirstLayout>
+
+      {/* Edit Project Modal */}
+      <AnimatePresence>
+        {isEditing && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+            onClick={() => setIsEditing(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-md p-6 bg-white dark:bg-gray-800 rounded-2xl shadow-2xl"
             >
-              <ArrowLeft className="w-5 h-5" />
-              <span className="font-medium">Back to Dashboard</span>
-            </Link>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+                Edit Project
+              </h2>
 
-            <div className="flex items-center gap-3">
-              {/* Edit Button */}
-              <button
-                onClick={() => setIsEditing(!isEditing)}
-                className="flex items-center gap-2 px-3 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors"
-              >
-                <Edit2 className="w-4 h-4" />
-                <span className="text-sm hidden sm:inline">Edit</span>
-              </button>
-
-              {/* Delete Button */}
-              <button
-                onClick={handleDelete}
-                disabled={deleting}
-                className="flex items-center gap-2 px-3 py-2 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
-              >
-                {deleting ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Trash2 className="w-4 h-4" />
-                )}
-                <span className="text-sm hidden sm:inline">{deleting ? 'Deleting...' : 'Delete'}</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Project Title */}
-          {isEditing ? (
-            <div className="mt-4 flex items-center gap-3">
               <input
                 type="text"
                 value={editName}
                 onChange={(e) => setEditName(e.target.value)}
-                className="flex-1 px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
                 placeholder="Project name"
+                className="w-full px-4 py-3 rounded-xl
+                  bg-gray-50 dark:bg-gray-900
+                  border border-gray-200 dark:border-gray-700
+                  text-gray-900 dark:text-white
+                  focus:outline-none focus:ring-2 focus:ring-blue-500
+                  mb-4"
               />
-              <button
-                onClick={() => {
-                  setIsEditing(false)
-                  setEditName(project.name)
-                  setEditDescription(project.description || '')
-                }}
-                className="px-4 py-2 border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
-              >
-                {saving ? 'Saving...' : 'Save'}
-              </button>
-            </div>
-          ) : (
-            <div className="mt-4">
-              <h1 className="text-xl font-bold text-slate-900">{project.name}</h1>
-              {project.description && (
-                <p className="text-sm text-slate-500 mt-1">{project.description}</p>
-              )}
-            </div>
-          )}
 
-          {/* Analysis Trigger (if no analysis yet) */}
-          {!analysisResult && !analyzing && (
-            <div className="mt-4 p-4 bg-purple-50 border border-purple-200 rounded-lg">
-              <div className="flex items-start gap-3">
-                <Sparkles className="w-5 h-5 text-purple-600 mt-0.5" />
-                <div className="flex-1">
-                  <p className="text-sm font-medium text-purple-900 mb-2">
-                    Start by analyzing your product idea
-                  </p>
-                  <div className="relative">
-                    <textarea
-                      value={feedbackInput}
-                      onChange={(e) => setFeedbackInput(e.target.value)}
-                      placeholder="Describe your product idea, target users, and key problems you're solving... (minimum 10 characters)"
-                      rows={3}
-                      className="w-full px-3 py-2 border border-purple-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 text-sm mb-2"
-                    />
-                    <div className="flex justify-between items-center mb-2">
-                      <div className={`text-xs ${
-                        feedbackInput.length < 10 ? 'text-red-500' :
-                        feedbackInput.length > 10000 ? 'text-red-500' : 'text-slate-500'
-                      }`}>
-                        {feedbackInput.length}/10,000 characters
-                        {feedbackInput.length < 10 && ` (${10 - feedbackInput.length} more needed)`}
-                      </div>
-                      <div className="text-xs text-slate-400">
-                        {feedbackInput.length < 10 ? '⚠️ Too short' :
-                         feedbackInput.length > 10000 ? '⚠️ Too long' : '✓ Ready to analyze'}
-                      </div>
-                    </div>
-                  </div>
-                  <button
-                    onClick={handleAnalyzeFeedback}
-                    disabled={!feedbackInput.trim() || feedbackInput.length < 10 || feedbackInput.length > 10000}
-                    className="px-4 py-2 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    Analyze Idea
-                  </button>
-                </div>
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => {
+                    setIsEditing(false)
+                    setEditName(project.name)
+                  }}
+                  className="px-4 py-2 rounded-xl
+                    text-gray-600 dark:text-gray-400
+                    hover:bg-gray-100 dark:hover:bg-gray-700
+                    transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSave}
+                  disabled={saving}
+                  className="px-4 py-2 rounded-xl
+                    bg-blue-500 text-white
+                    hover:bg-blue-600
+                    disabled:opacity-50
+                    transition-colors"
+                >
+                  {saving ? 'Saving...' : 'Save'}
+                </button>
               </div>
-            </div>
-          )}
-
-          {/* Analyzing State */}
-          {analyzing && (
-            <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-              <div className="flex items-center gap-3">
-                <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
-                <div>
-                  <p className="text-sm font-medium text-blue-900">Analyzing your product...</p>
-                  <p className="text-xs text-blue-600 mt-1">Using AI to generate comprehensive strategy (30-60 seconds)</p>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      </header>
-
-      {/* Workspace Content - ChatGPT Style Layout */}
-      {stableAnalysisResult ? (
-        <ChatGPTLayout
-          project={project}
-          analysisResult={stableAnalysisResult}
-          className="flex-1"
-        />
-      ) : (
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-center max-w-md">
-            <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-purple-100 flex items-center justify-center">
-              <Sparkles className="w-10 h-10 text-purple-600" />
-            </div>
-            <h2 className="text-xl font-bold text-slate-900 mb-2">
-              Welcome to Your Workspace
-            </h2>
-            <p className="text-slate-600 mb-6">
-              Enter your product idea above to generate a comprehensive AI-powered strategy with:
-            </p>
-            <div className="grid grid-cols-2 gap-3 text-sm text-slate-500">
-              <div className="p-3 bg-white border border-slate-200 rounded-lg">
-                <strong className="text-slate-700">10+ Problems</strong>
-                <p className="text-xs mt-1">Identified pain points</p>
-              </div>
-              <div className="p-3 bg-white border border-slate-200 rounded-lg">
-                <strong className="text-slate-700">15+ Features</strong>
-                <p className="text-xs mt-1">Solution recommendations</p>
-              </div>
-              <div className="p-3 bg-white border border-slate-200 rounded-lg">
-                <strong className="text-slate-700">25+ Tasks</strong>
-                <p className="text-xs mt-1">Development breakdown</p>
-              </div>
-              <div className="p-3 bg-white border border-slate-200 rounded-lg">
-                <strong className="text-slate-700">AI Chat</strong>
-                <p className="text-xs mt-1">Ask follow-up questions</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </DragDropProvider>
   )
 }

@@ -2,12 +2,12 @@ import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
 /**
- * Middleware for route protection and session management
+ * Proxy for route protection and session management
  * Protects /dashboard routes and refreshes auth tokens
  *
- * Next.js 16+: This middleware pattern is still valid for auth
+ * Next.js 16+: Renamed from middleware to proxy
  */
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   let response = NextResponse.next({
     request: {
       headers: request.headers,

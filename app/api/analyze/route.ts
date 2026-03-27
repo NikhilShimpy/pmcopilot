@@ -1,8 +1,10 @@
 /**
- * PMCopilot - Comprehensive Analysis API with Streaming Progress
+ * PMCopilot - Enhanced Comprehensive Analysis API
  *
- * POST /api/analyze - Run comprehensive AI feedback analysis with live updates
+ * POST /api/analyze - Run comprehensive AI feedback analysis
  * GET /api/analyze - Get analysis history
+ *
+ * Supports depth control: short, medium, long, extra-long
  */
 
 import { NextRequest } from 'next/server';
@@ -16,13 +18,82 @@ import {
 } from '@/lib/errorHandler';
 import { analysisEngineService } from '@/services/analysis-engine.service';
 import { runComprehensiveStrategyAnalysis } from '@/lib/comprehensiveStrategyEngine';
-import { AnalyzeRequest, PipelineContext } from '@/types/analysis';
+import { PipelineContext } from '@/types/analysis';
 import { SUCCESS_MESSAGES, DB_TABLES, VALIDATION } from '@/utils/constants';
 import { isValidUUID } from '@/utils/helpers';
 
+// Depth configuration for output control
+type OutputDepth = 'short' | 'medium' | 'long' | 'extra-long';
+
+const DEPTH_CONFIG: Record<OutputDepth, {
+  minProblems: number;
+  aimProblems: number;
+  minFeatures: number;
+  aimFeatures: number;
+  minTasks: number;
+  aimTasks: number;
+  descriptionLength: string;
+  timeout: number;
+}> = {
+  short: {
+    minProblems: 5,
+    aimProblems: 8,
+    minFeatures: 8,
+    aimFeatures: 12,
+    minTasks: 10,
+    aimTasks: 15,
+    descriptionLength: 'concise (50-100 words per section)',
+    timeout: 45000,
+  },
+  medium: {
+    minProblems: 8,
+    aimProblems: 12,
+    minFeatures: 12,
+    aimFeatures: 18,
+    minTasks: 18,
+    aimTasks: 25,
+    descriptionLength: 'balanced (100-200 words per section)',
+    timeout: 60000,
+  },
+  long: {
+    minProblems: 12,
+    aimProblems: 18,
+    minFeatures: 18,
+    aimFeatures: 28,
+    minTasks: 28,
+    aimTasks: 40,
+    descriptionLength: 'comprehensive (200-400 words per section)',
+    timeout: 90000,
+  },
+  'extra-long': {
+    minProblems: 15,
+    aimProblems: 25,
+    minFeatures: 25,
+    aimFeatures: 40,
+    minTasks: 40,
+    aimTasks: 60,
+    descriptionLength: 'maximum detail (400-600+ words per section, include examples and edge cases)',
+    timeout: 120000,
+  },
+};
+
+// Extended request interface
+interface EnhancedAnalyzeRequest {
+  feedback: string;
+  project_id?: string;
+  detail_level?: OutputDepth;
+  context?: {
+    project_name?: string;
+    project_context?: string;
+    user_persona?: string;
+    industry?: string;
+    product_type?: string;
+  };
+}
+
 /**
  * POST /api/analyze
- * Run comprehensive feedback analysis with streaming progress updates
+ * Run comprehensive feedback analysis with depth control
  */
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
@@ -31,7 +102,7 @@ export async function POST(request: NextRequest) {
     logger.apiRequest('POST', '/api/analyze');
 
     // Parse request body
-    let body: AnalyzeRequest;
+    let body: EnhancedAnalyzeRequest;
     try {
       body = await request.json();
     } catch {
@@ -57,19 +128,25 @@ export async function POST(request: NextRequest) {
       throwValidationError('Invalid project_id format');
     }
 
-    // Get server client and user (works with or without auth)
+    // Get server client and user
     const supabase = await createServerSupabaseClient();
     const user = await getUserOrAnonymous();
     const isAuthenticated = user.id !== 'anonymous';
 
-    // Build pipeline context
-    const pipelineContext: PipelineContext = {
+    // Determine depth level
+    const depthLevel: OutputDepth = body.detail_level || 'long';
+    const depthConfig = DEPTH_CONFIG[depthLevel];
+
+    // Build pipeline context with depth settings
+    const pipelineContext: PipelineContext & { depth?: OutputDepth; depthConfig?: typeof depthConfig } = {
       project_id: body.project_id,
       project_name: body.context?.project_name,
       project_context: body.context?.project_context,
       user_persona: body.context?.user_persona,
       industry: body.context?.industry,
       product_type: body.context?.product_type,
+      depth: depthLevel,
+      depthConfig,
     };
 
     // Fetch project details if authenticated
@@ -91,17 +168,18 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const detailLevel = body.detail_level || 'comprehensive';
-
     logger.info('Starting comprehensive analysis', {
       feedbackLength: body.feedback.length,
       hasContext: !!body.context,
       hasProjectId: !!body.project_id,
       isAuthenticated,
-      detailLevel,
+      depthLevel,
+      expectedProblems: `${depthConfig.minProblems}-${depthConfig.aimProblems}`,
+      expectedFeatures: `${depthConfig.minFeatures}-${depthConfig.aimFeatures}`,
+      expectedTasks: `${depthConfig.minTasks}-${depthConfig.aimTasks}`,
     });
 
-    // Run comprehensive analysis
+    // Run comprehensive analysis with depth-aware prompt
     const comprehensiveResult = await runComprehensiveStrategyAnalysis(
       body.feedback,
       pipelineContext
@@ -147,6 +225,7 @@ export async function POST(request: NextRequest) {
       tasksCreated: comprehensiveResult.result.development_tasks?.length || 0,
       provider: comprehensiveResult.provider,
       processingTime,
+      depthLevel,
     });
 
     // Build response
@@ -155,6 +234,7 @@ export async function POST(request: NextRequest) {
       saved_id: savedAnalysisId,
       provider: comprehensiveResult.provider,
       api_processing_time_ms: processingTime,
+      depth_level: depthLevel,
     };
 
     return successResponse(response, SUCCESS_MESSAGES.ANALYSIS_COMPLETED, 200);
@@ -238,6 +318,7 @@ export async function GET(request: NextRequest) {
       project_id: analysis.project_id,
       project_name: analysis.projects?.name,
       created_at: analysis.created_at,
+      result: analysis.result, // Include full result for output page
       summary: {
         problems_count: analysis.result?.problem_analysis?.length || 0,
         features_count: analysis.result?.feature_system?.length || 0,
