@@ -80,6 +80,36 @@ export function handleError(error: unknown): NextResponse<ApiResponse> {
 
   // Handle standard Error
   if (error instanceof Error) {
+    const typedError = error as Error & {
+      isGeminiPoolExhausted?: boolean;
+      keyPoolStatus?: unknown;
+      isConfigError?: boolean;
+    };
+
+    if (typedError.isGeminiPoolExhausted) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: typedError.message,
+          key_pool_status: typedError.keyPoolStatus || undefined,
+        },
+        { status: 429 }
+      );
+    }
+
+    if (
+      typedError.isConfigError ||
+      typedError.message.includes('GEMINI_CONFIG_ERROR')
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: typedError.message,
+        },
+        { status: 500 }
+      );
+    }
+
     return NextResponse.json(
       {
         success: false,

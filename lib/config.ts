@@ -45,11 +45,11 @@ function getEnv(
 function getGeminiApiKeys(): string[] {
   const keys = new Set<string>();
   const primaryKey = process.env.GEMINI_API_KEY?.trim();
-  const pooledKeys =
-    process.env.GEMINI_API_KEYS
-      ?.split(',')
-      .map((key) => key.trim())
-      .filter(Boolean) || [];
+  const pooledKeysRaw = process.env.GEMINI_API_KEYS || '';
+  const pooledKeys = pooledKeysRaw
+    .split(/[\n,;]+/)
+    .map((key) => key.trim())
+    .filter(Boolean);
 
   if (primaryKey) {
     keys.add(primaryKey);
@@ -59,10 +59,25 @@ function getGeminiApiKeys(): string[] {
     keys.add(key);
   }
 
-  for (let index = 1; index <= 10; index++) {
+  for (let index = 1; index <= 20; index++) {
     const numberedKey = process.env[`GEMINI_API_KEY_${index}`]?.trim();
     if (numberedKey) {
       keys.add(numberedKey);
+    }
+  }
+
+  const dynamicNumberedKeys = Object.keys(process.env)
+    .filter((keyName) => /^GEMINI_API_KEY_\d+$/.test(keyName))
+    .sort((left, right) => {
+      const leftIndex = Number(left.replace('GEMINI_API_KEY_', ''));
+      const rightIndex = Number(right.replace('GEMINI_API_KEY_', ''));
+      return leftIndex - rightIndex;
+    });
+
+  for (const keyName of dynamicNumberedKeys) {
+    const value = process.env[keyName]?.trim();
+    if (value) {
+      keys.add(value);
     }
   }
 
@@ -185,6 +200,7 @@ export function validateEnvironment(): void {
 
     console.log('[Config] Environment variables validated successfully');
     console.log(`[Config] Gemini model: ${config.gemini.model} (free-tier only)`);
+    console.log(`[Config] Gemini key pool size: ${config.gemini.apiKeys.length}`);
     console.log('[Config] Provider mode: Gemini only (no paid fallback)');
   } catch (error) {
     console.error('[Config] Environment validation failed:', error);

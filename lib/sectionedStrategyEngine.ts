@@ -68,12 +68,12 @@ const SECTION_MAX_TOKENS: Record<OutputDepth, Record<string, number>> = {
     'gaps-opportunities': 850,
     prd: 2100,
     'system-design': 900,
-    'development-tasks': 1100,
+    'development-tasks': 1500,
     'execution-roadmap': 900,
-    'manpower-planning': 850,
+    'manpower-planning': 1000,
     resources: 850,
-    'cost-estimation': 950,
-    timeline: 850,
+    'cost-estimation': 1200,
+    timeline: 1000,
     'impact-analysis': 850,
   },
   medium: {
@@ -83,12 +83,12 @@ const SECTION_MAX_TOKENS: Record<OutputDepth, Record<string, number>> = {
     'gaps-opportunities': 1100,
     prd: 3200,
     'system-design': 1200,
-    'development-tasks': 1450,
+    'development-tasks': 2200,
     'execution-roadmap': 1200,
-    'manpower-planning': 1050,
+    'manpower-planning': 1300,
     resources: 1050,
-    'cost-estimation': 1250,
-    timeline: 1050,
+    'cost-estimation': 1500,
+    timeline: 1400,
     'impact-analysis': 1050,
   },
   long: {
@@ -98,12 +98,12 @@ const SECTION_MAX_TOKENS: Record<OutputDepth, Record<string, number>> = {
     'gaps-opportunities': 1300,
     prd: 3800,
     'system-design': 1500,
-    'development-tasks': 1850,
+    'development-tasks': 3000,
     'execution-roadmap': 1450,
-    'manpower-planning': 1250,
+    'manpower-planning': 1500,
     resources: 1250,
-    'cost-estimation': 1550,
-    timeline: 1250,
+    'cost-estimation': 1900,
+    timeline: 1700,
     'impact-analysis': 1250,
   },
   'extra-long': {
@@ -113,12 +113,12 @@ const SECTION_MAX_TOKENS: Record<OutputDepth, Record<string, number>> = {
     'gaps-opportunities': 1600,
     prd: 4000,
     'system-design': 1800,
-    'development-tasks': 2200,
+    'development-tasks': 3600,
     'execution-roadmap': 1750,
-    'manpower-planning': 1450,
+    'manpower-planning': 1700,
     resources: 1450,
-    'cost-estimation': 1850,
-    timeline: 1450,
+    'cost-estimation': 2300,
+    timeline: 2000,
     'impact-analysis': 1450,
   },
 };
@@ -130,7 +130,7 @@ const SECTION_INPUT_CHAR_LIMIT: Record<string, number> = {
   'gaps-opportunities': 3600,
   prd: 4200,
   'system-design': 3400,
-  'development-tasks': 3400,
+  'development-tasks': 4200,
   'execution-roadmap': 3200,
   'manpower-planning': 3000,
   resources: 3000,
@@ -406,12 +406,17 @@ function buildSeedContext(section: DeferredStrategySection, result: PartialStrat
     seed.development_tasks = trimArray(result.development_tasks, 16);
   }
 
-  if (section === 'resources' || section === 'cost-estimation') {
+  if (
+    section === 'resources' ||
+    section === 'cost-estimation' ||
+    section === 'development-tasks'
+  ) {
     seed.system_design = result.system_design || null;
     seed.manpower_planning = result.manpower_planning || null;
   }
 
   if (
+    section === 'development-tasks' ||
     section === 'timeline' ||
     section === 'manpower-planning' ||
     section === 'cost-estimation'
@@ -681,18 +686,31 @@ Rules:
     {
       "id": "TASK-001",
       "title": string,
-      "type": "frontend" | "backend" | "ai" | "devops" | "design" | "testing" | "database",
+      "description": string,
+      "why_this_task_matters": string,
+      "type": "frontend" | "backend" | "ai" | "devops" | "design" | "testing" | "database" | "data" | "security" | "product",
+      "owner_role": string,
       "priority": "Critical" | "High" | "Medium" | "Low",
       "estimated_time": string,
       "tech_stack": string[],
+      "linked_features": string[],
+      "section_dependencies": string[],
       "dependencies": string[],
       "detailed_steps": string[],
+      "deliverables": string[],
+      "done_criteria": string[],
       "expected_output": string
     }
   ]
 }
 
-Generate 14-24 realistic tasks with clear sequencing.`,
+Rules:
+- Generate 18-32 implementation-ready tasks for meaningful product inputs (never below 16).
+- Build a real execution plan, not a generic setup checklist.
+- Cover architecture/discovery, data modeling, backend services, frontend workflows, AI/recommendation logic, integrations, analytics, testing/QA, security, deployment/monitoring, and post-launch optimization (when relevant).
+- Every task must include: why_this_task_matters, owner_role, linked_features, section_dependencies, dependencies, deliverables, and done_criteria.
+- Use linked_features values from generated feature IDs/titles where possible.
+- Keep dependencies realistic and sequenced for delivery teams.`,
     'execution-roadmap': `Return valid JSON:
 {
   "execution_roadmap": {
@@ -892,6 +910,7 @@ function stampMetadata(
 
 const MIN_RICH_PROBLEM_COUNT = 10;
 const MIN_RICH_FEATURE_COUNT = 10;
+const MIN_RICH_TASK_COUNT = 16;
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
@@ -943,6 +962,40 @@ function clampScore(value: unknown, fallback = 6): number {
     return fallback;
   }
   return Math.max(1, Math.min(10, Math.round(numeric)));
+}
+
+function normalizeTenPointScore(value: unknown, fallback = 6.5): number {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return fallback;
+  }
+
+  if (numeric <= 10) {
+    return Number(Math.max(0, Math.min(10, numeric)).toFixed(1));
+  }
+
+  if (numeric <= 100) {
+    return Number((numeric / 10).toFixed(1));
+  }
+
+  return 10;
+}
+
+function normalizeConfidenceScore(value: unknown, fallback = 0.68): number {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return fallback;
+  }
+
+  if (numeric <= 1) {
+    return Number(Math.max(0, Math.min(1, numeric)).toFixed(2));
+  }
+
+  if (numeric <= 100) {
+    return Number((numeric / 100).toFixed(2));
+  }
+
+  return 1;
 }
 
 function normalizeId(
@@ -1013,6 +1066,849 @@ function deriveIdeaContext(
   };
 }
 
+function selectionIncludes(value: string | undefined, keywords: string[]): boolean {
+  if (!value) {
+    return false;
+  }
+  const normalized = value.toLowerCase();
+  return keywords.some((keyword) => normalized.includes(keyword));
+}
+
+function scoreFromSelection(
+  value: string | undefined,
+  weightedMatchers: Array<{ keywords: string[]; score: number }>,
+  fallback: number
+): number {
+  if (!value) {
+    return fallback;
+  }
+
+  const normalized = value.toLowerCase();
+  for (const matcher of weightedMatchers) {
+    if (matcher.keywords.some((keyword) => normalized.includes(keyword))) {
+      return matcher.score;
+    }
+  }
+
+  return fallback;
+}
+
+function getRoleMonthlyCost(role: string, seniority: string | undefined): number {
+  const normalizedRole = role.toLowerCase();
+  const normalizedSeniority = (seniority || 'mid').toLowerCase();
+
+  const seniorityMultiplier = selectionIncludes(normalizedSeniority, ['junior'])
+    ? 0.78
+    : selectionIncludes(normalizedSeniority, ['lead', 'principal', 'staff', 'architect'])
+    ? 1.35
+    : selectionIncludes(normalizedSeniority, ['senior'])
+    ? 1.2
+    : 1;
+
+  const base =
+    selectionIncludes(normalizedRole, ['product manager']) ||
+    selectionIncludes(normalizedRole, ['program manager'])
+      ? 180000
+      : selectionIncludes(normalizedRole, ['ai', 'ml', 'machine learning'])
+      ? 220000
+      : selectionIncludes(normalizedRole, ['devops', 'sre'])
+      ? 190000
+      : selectionIncludes(normalizedRole, ['designer', 'ux', 'ui'])
+      ? 130000
+      : selectionIncludes(normalizedRole, ['qa', 'test'])
+      ? 110000
+      : selectionIncludes(normalizedRole, ['backend'])
+      ? 175000
+      : selectionIncludes(normalizedRole, ['frontend'])
+      ? 165000
+      : 170000;
+
+  return Math.round(base * seniorityMultiplier);
+}
+
+function estimateCostModel(
+  normalizedFeedback: string,
+  existingResult: PartialStrategyResult,
+  context?: GenerationContext
+) {
+  const intake = getCostIntakeFromMetadata(existingResult);
+  const features = Array.isArray(existingResult.feature_system)
+    ? existingResult.feature_system
+    : [];
+  const tasks = Array.isArray(existingResult.development_tasks)
+    ? existingResult.development_tasks
+    : [];
+
+  const highComplexityFeatures = features.filter((feature: any) =>
+    selectionIncludes(feature?.complexity, ['high', 'complex'])
+  ).length;
+
+  const featureScopeFactor = Math.max(0, features.length - 8) * 0.03;
+  const taskScopeFactor = Math.max(0, tasks.length - 14) * 0.01;
+  const complexitySignal =
+    scoreFromSelection(
+      intake?.technical_complexity?.backend_complexity,
+      [
+        { keywords: ['high', 'complex'], score: 1.24 },
+        { keywords: ['medium'], score: 1.08 },
+        { keywords: ['low', 'simple'], score: 0.92 },
+      ],
+      1.06
+    ) *
+    scoreFromSelection(
+      intake?.feature_complexity?.advanced_features,
+      [
+        { keywords: ['many', 'extensive', 'high'], score: 1.2 },
+        { keywords: ['moderate', 'medium'], score: 1.08 },
+        { keywords: ['few', 'low', 'minimal'], score: 0.92 },
+      ],
+      1
+    ) *
+    scoreFromSelection(
+      intake?.feature_complexity?.realtime_features,
+      [
+        { keywords: ['required', 'high', 'yes'], score: 1.15 },
+        { keywords: ['some'], score: 1.08 },
+        { keywords: ['none', 'no'], score: 0.95 },
+      ],
+      1
+    );
+
+  const teamMode = intake?.development_factors?.team_mode || 'small team';
+  const seniority = intake?.development_factors?.seniority || 'mid';
+  const deliverySpeed = intake?.development_factors?.delivery_speed || 'balanced';
+  const hostingScale = intake?.infrastructure_hosting?.hosting_scale || 'mvp';
+  const aiUsage = intake?.integrations_apis?.ai_apis || intake?.feature_complexity?.ai_features;
+  const maintenanceLevel = intake?.maintenance_scaling?.support_level || 'standard';
+
+  const baseTeamMonthly = scoreFromSelection(
+    teamMode,
+    [
+      { keywords: ['solo', 'single'], score: 160000 },
+      { keywords: ['small', 'lean'], score: 520000 },
+      { keywords: ['full', 'cross-functional', 'scale'], score: 1180000 },
+    ],
+    520000
+  );
+
+  const seniorityMultiplier = scoreFromSelection(
+    seniority,
+    [
+      { keywords: ['junior'], score: 0.82 },
+      { keywords: ['mid'], score: 1 },
+      { keywords: ['senior', 'lead', 'principal'], score: 1.28 },
+    ],
+    1
+  );
+
+  const speedMultiplier = scoreFromSelection(
+    deliverySpeed,
+    [
+      { keywords: ['aggressive', 'fast'], score: 1.2 },
+      { keywords: ['balanced'], score: 1 },
+      { keywords: ['slow', 'steady'], score: 0.92 },
+    ],
+    1
+  );
+
+  const scopeMultiplier = Math.min(
+    1.95,
+    Math.max(0.88, 0.95 + featureScopeFactor + taskScopeFactor + highComplexityFeatures * 0.04)
+  );
+
+  const teamMonthlyCost = Math.round(
+    baseTeamMonthly * seniorityMultiplier * speedMultiplier * complexitySignal * scopeMultiplier
+  );
+
+  const infraBaseMonthly = scoreFromSelection(
+    hostingScale,
+    [
+      { keywords: ['mvp', 'small', 'starter'], score: 12000 },
+      { keywords: ['growth', 'medium'], score: 42000 },
+      { keywords: ['scale', 'high', 'enterprise'], score: 120000 },
+    ],
+    28000
+  );
+
+  const concurrencyMultiplier = scoreFromSelection(
+    intake?.user_scale?.concurrent_users,
+    [
+      { keywords: ['low', '<1k', 'under 1k'], score: 0.92 },
+      { keywords: ['1k', '5k', 'medium'], score: 1.05 },
+      { keywords: ['10k', 'high', '50k', '100k'], score: 1.35 },
+    ],
+    1
+  );
+
+  const realtimeMultiplier = scoreFromSelection(
+    intake?.performance_requirements?.realtime_response ||
+      intake?.feature_complexity?.realtime_features,
+    [
+      { keywords: ['strict', 'high', 'realtime', 'sub-second'], score: 1.28 },
+      { keywords: ['moderate'], score: 1.1 },
+      { keywords: ['low', 'not required', 'none'], score: 0.94 },
+    ],
+    1
+  );
+
+  const infraMonthly = Math.round(
+    infraBaseMonthly * concurrencyMultiplier * realtimeMultiplier
+  );
+
+  const aiApiMonthly = Math.round(
+    scoreFromSelection(
+      aiUsage,
+      [
+        { keywords: ['none', 'no'], score: 6000 },
+        { keywords: ['basic', 'limited'], score: 18000 },
+        { keywords: ['moderate', 'recommendation'], score: 35000 },
+        { keywords: ['advanced', 'heavy', 'real-time'], score: 80000 },
+      ],
+      22000
+    ) * Math.max(0.9, concurrencyMultiplier)
+  );
+
+  const toolsMonthly = Math.round(
+    scoreFromSelection(
+      intake?.integrations_apis?.communication,
+      [
+        { keywords: ['none', 'minimal'], score: 7000 },
+        { keywords: ['email', 'sms'], score: 12000 },
+        { keywords: ['multichannel', 'high'], score: 22000 },
+      ],
+      11000
+    )
+  );
+
+  const maintenanceMonthly = Math.round(
+    teamMonthlyCost *
+      scoreFromSelection(
+        maintenanceLevel,
+        [
+          { keywords: ['basic', 'minimal'], score: 0.12 },
+          { keywords: ['standard'], score: 0.18 },
+          { keywords: ['high', '24x7', 'premium'], score: 0.27 },
+        ],
+        0.18
+      )
+  );
+
+  const developmentCost = Math.round(teamMonthlyCost * 7.5);
+  const cloudCostYearly = infraMonthly * 12;
+  const aiApiCostYearly = aiApiMonthly * 12;
+  const toolsCostYearly = toolsMonthly * 12;
+  const operationalCostYearly = maintenanceMonthly * 12;
+
+  const totalFirstYearCost = Math.round(
+    developmentCost + cloudCostYearly + aiApiCostYearly + toolsCostYearly + operationalCostYearly
+  );
+
+  const lowAnnual = Math.round(Math.max(900000, totalFirstYearCost * 0.68));
+  const startupAnnual = Math.round(totalFirstYearCost);
+  const scaleAnnual = Math.round(totalFirstYearCost * 1.82);
+
+  const breakEvenMonths = Math.max(
+    10,
+    Math.min(
+      36,
+      Math.round(
+        scoreFromSelection(
+          intake?.business_model_impact?.business_model,
+          [
+            { keywords: ['subscription', 'saas'], score: 16 },
+            { keywords: ['freemium'], score: 20 },
+            { keywords: ['marketplace'], score: 18 },
+            { keywords: ['internal', 'ops'], score: 24 },
+            { keywords: ['ad'], score: 22 },
+          ],
+          18
+        ) * scoreFromSelection(intake?.market_business?.competition_level, [
+          { keywords: ['low'], score: 0.9 },
+          { keywords: ['medium'], score: 1 },
+          { keywords: ['high'], score: 1.15 },
+        ], 1)
+      )
+    )
+  );
+
+  const idea = deriveIdeaContext(normalizedFeedback, existingResult, context);
+  const assumptions = [
+    `${idea.productName} is built with a staged rollout (MVP -> startup growth -> scale).`,
+    `Engineering hiring follows a ${teamMode} model with ${seniority} talent bias.`,
+    `Costing uses India-focused salary and cloud pricing baselines with a ${context?.depth || 'medium'} depth scope.`,
+  ];
+
+  const costDrivers = [
+    {
+      driver: 'Team model',
+      selected_option: teamMode,
+      impact_level: teamMonthlyCost > 900000 ? 'High' : teamMonthlyCost > 500000 ? 'Medium' : 'Low',
+      notes: `Estimated engineering burn: ₹${Math.round(teamMonthlyCost / 1000)}K/month.`,
+    },
+    {
+      driver: 'Technical complexity',
+      selected_option:
+        intake?.technical_complexity?.backend_complexity ||
+        intake?.technical_complexity?.frontend_complexity ||
+        'Medium',
+      impact_level: complexitySignal >= 1.2 ? 'High' : complexitySignal >= 1.02 ? 'Medium' : 'Low',
+      notes: `Feature and architecture complexity multiplier: ${complexitySignal.toFixed(2)}x.`,
+    },
+    {
+      driver: 'Hosting and scale',
+      selected_option: hostingScale,
+      impact_level: infraMonthly >= 80000 ? 'High' : infraMonthly >= 30000 ? 'Medium' : 'Low',
+      notes: `Infrastructure estimate: ₹${Math.round(infraMonthly / 1000)}K/month.`,
+    },
+    {
+      driver: 'AI API usage',
+      selected_option: aiUsage || 'Basic',
+      impact_level: aiApiMonthly >= 70000 ? 'High' : aiApiMonthly >= 25000 ? 'Medium' : 'Low',
+      notes: `AI API estimate: ₹${Math.round(aiApiMonthly / 1000)}K/month.`,
+    },
+  ];
+
+  return {
+    teamMonthlyCost,
+    infraMonthly,
+    aiApiMonthly,
+    toolsMonthly,
+    maintenanceMonthly,
+    developmentCost,
+    cloudCostYearly,
+    aiApiCostYearly,
+    toolsCostYearly,
+    operationalCostYearly,
+    totalFirstYearCost,
+    lowAnnual,
+    startupAnnual,
+    scaleAnnual,
+    breakEvenMonths,
+    assumptions,
+    costDrivers,
+    intake,
+  };
+}
+
+function normalizeExecutiveDashboard(
+  dashboard: any,
+  normalizedFeedback: string,
+  existingResult: PartialStrategyResult,
+  context?: GenerationContext
+) {
+  const idea = deriveIdeaContext(normalizedFeedback, existingResult, context);
+  const base = dashboard && typeof dashboard === 'object' ? { ...dashboard } : {};
+  const ideaExpansion = normalizeWhitespace(base.idea_expansion || '') ||
+    `${idea.productName} can become a focused ${idea.projectType} for ${idea.targetUsers} by reducing workflow friction and giving clear next actions.`;
+  const marketOpportunity = normalizeWhitespace(base.market_opportunity || '') ||
+    `The opportunity is strongest where existing tools fail to combine execution guidance, visibility, and measurable outcomes for ${idea.targetUsers}.`;
+  const recommendedStrategy = normalizeWhitespace(base.recommended_strategy || '') ||
+    `Launch with a narrow MVP for one high-value workflow, validate retention, then scale with automation and integrations.`;
+
+  return {
+    idea_expansion: ideaExpansion,
+    key_insight:
+      normalizeWhitespace(base.key_insight || '') ||
+      `${idea.targetUsers} adopt faster when guided decisions are linked to measurable outcomes.`,
+    innovation_score: normalizeTenPointScore(base.innovation_score, 7.2),
+    market_opportunity: marketOpportunity,
+    complexity_level:
+      base.complexity_level === 'Low' ||
+      base.complexity_level === 'Medium' ||
+      base.complexity_level === 'High' ||
+      base.complexity_level === 'Very High'
+        ? base.complexity_level
+        : 'Medium',
+    recommended_strategy: recommendedStrategy,
+    idea_expansion_breakdown: ensureStringList(base.idea_expansion_breakdown, [
+      `Primary user outcome: help ${idea.targetUsers} complete critical workflows quickly.`,
+      'Product direction: guided execution + adaptive recommendations + measurable progress.',
+      'Commercial path: start with MVP utility, then layer monetizable intelligence.',
+    ], 3, 6),
+    market_opportunity_signals: ensureStringList(base.market_opportunity_signals, [
+      'Current alternatives are fragmented and force manual coordination.',
+      'Teams need tighter linkage between planning decisions and measurable impact.',
+      'Users are willing to adopt tools that reduce time-to-value in first sessions.',
+    ], 3, 6),
+    recommended_strategy_actions: ensureStringList(base.recommended_strategy_actions, [
+      'Define MVP scope around one measurable user workflow.',
+      'Instrument activation, retention, and cycle-time KPIs from day one.',
+      'Sequence integrations after MVP proof rather than before launch.',
+    ], 3, 6),
+    score_rationale:
+      normalizeWhitespace(base.score_rationale || '') ||
+      'Score reflects market novelty, defensibility potential, and implementation feasibility.',
+  };
+}
+
+function normalizeTimelineEstimation(
+  timeline: any,
+  normalizedFeedback: string,
+  existingResult: PartialStrategyResult,
+  context?: GenerationContext
+) {
+  const idea = deriveIdeaContext(normalizedFeedback, existingResult, context);
+  const features = Array.isArray(existingResult.feature_system)
+    ? existingResult.feature_system
+    : [];
+  const tasks = Array.isArray(existingResult.development_tasks)
+    ? existingResult.development_tasks
+    : [];
+  const manpower = (existingResult.manpower_planning || {}) as any;
+  const featureComplexityBoost = Math.min(6, features.filter((feature: any) =>
+    selectionIncludes(feature?.complexity, ['high', 'complex'])
+  ).length);
+
+  const baseMvpWeeks = Math.max(
+    8,
+    Math.min(
+      18,
+      9 + Math.round(features.length / 4) + Math.round(tasks.length / 12) + featureComplexityBoost
+    )
+  );
+
+  const discoveryWeeks = 1 + Math.min(2, Math.round(features.length / 10));
+  const designWeeks = 2 + Math.min(2, Math.round(features.length / 8));
+  const mvpBuildWeeks = Math.max(4, baseMvpWeeks - discoveryWeeks - designWeeks - 2);
+  const testingWeeks = 2 + (featureComplexityBoost >= 3 ? 1 : 0);
+  const launchWeeks = 1;
+  const postLaunchWeeks = 4 + Math.min(4, Math.round(features.length / 6));
+
+  const phases = [
+    {
+      phase_name: 'Discovery',
+      duration: `${discoveryWeeks} week${discoveryWeeks > 1 ? 's' : ''}`,
+      goals: [
+        `Lock MVP scope for ${idea.productName}`,
+        'Define KPIs, dependencies, and success gates',
+      ],
+      deliverables: [
+        'Prioritized feature list',
+        'Delivery risks and mitigation tracker',
+      ],
+      dependencies: ['Stakeholder alignment', 'User problem validation'],
+      risks: ['Scope churn', 'Insufficient problem evidence'],
+      staffing_assumptions: ['PM + Tech Lead + Designer'],
+    },
+    {
+      phase_name: 'Design',
+      duration: `${designWeeks} weeks`,
+      goals: ['Finalize user flows and UX decisions', 'Prepare implementation-ready specs'],
+      deliverables: ['Wireframes and key screen specs', 'Acceptance criteria for core journeys'],
+      dependencies: ['Discovery outputs', 'Content and data model definitions'],
+      risks: ['UX rework due to missing edge cases'],
+      staffing_assumptions: ['Designer + PM + Frontend Lead'],
+    },
+    {
+      phase_name: 'MVP Build',
+      duration: `${mvpBuildWeeks} weeks`,
+      goals: ['Build and integrate core workflows', 'Ship high-priority features first'],
+      deliverables: ['Core frontend and backend modules', 'Instrumentation and baseline analytics'],
+      dependencies: ['Stable architecture decisions', 'Third-party API readiness'],
+      risks: ['Integration delays', 'Technical debt under speed pressure'],
+      staffing_assumptions: [
+        `${Math.max(2, Math.min(6, manpower?.total_team_size || 3))} engineering contributors`,
+      ],
+    },
+    {
+      phase_name: 'Testing',
+      duration: `${testingWeeks} weeks`,
+      goals: ['Stabilize quality and performance', 'Validate release readiness'],
+      deliverables: ['QA sign-off report', 'Performance and security checklist'],
+      dependencies: ['Feature-complete MVP build'],
+      risks: ['Regression bugs', 'Underestimated non-functional fixes'],
+      staffing_assumptions: ['QA + Engineering + PM'],
+    },
+    {
+      phase_name: 'Launch',
+      duration: `${launchWeeks} week`,
+      goals: ['Release to pilot users', 'Monitor telemetry and incidents'],
+      deliverables: ['Pilot launch runbook', 'Go/no-go decision log'],
+      dependencies: ['Testing sign-off', 'Support playbooks'],
+      risks: ['Unexpected production load', 'Adoption lag'],
+      staffing_assumptions: ['On-call engineering + PM support'],
+    },
+    {
+      phase_name: 'Post-launch Iteration',
+      duration: `${postLaunchWeeks} weeks`,
+      goals: ['Improve activation and retention', 'Prioritize growth features'],
+      deliverables: ['Iteration backlog', 'MVP vs post-MVP transition plan'],
+      dependencies: ['Pilot data and user feedback'],
+      risks: ['Feature creep', 'Weak KPI ownership'],
+      staffing_assumptions: ['Core product squad with part-time analytics'],
+    },
+  ];
+
+  const mvpMilestones = [
+    { week: discoveryWeeks, milestone: 'Discovery scope locked' },
+    { week: discoveryWeeks + designWeeks, milestone: 'Design sign-off complete' },
+    {
+      week: discoveryWeeks + designWeeks + Math.max(2, Math.round(mvpBuildWeeks * 0.6)),
+      milestone: 'Core MVP workflows integrated',
+    },
+    {
+      week: discoveryWeeks + designWeeks + mvpBuildWeeks + testingWeeks,
+      milestone: 'MVP ready for launch',
+    },
+  ];
+
+  const totalWeeks = discoveryWeeks + designWeeks + mvpBuildWeeks + testingWeeks + launchWeeks + postLaunchWeeks;
+  const mvpTotalWeeks = discoveryWeeks + designWeeks + mvpBuildWeeks + testingWeeks + launchWeeks;
+  const base = timeline && typeof timeline === 'object' ? { ...timeline } : {};
+
+  return {
+    ...base,
+    total_weeks: Number(base.total_weeks) || totalWeeks,
+    mvp_timeline: {
+      total_weeks: Number(base.mvp_timeline?.total_weeks) || mvpTotalWeeks,
+      key_milestones: Array.isArray(base.mvp_timeline?.key_milestones) &&
+        base.mvp_timeline.key_milestones.length > 0
+        ? base.mvp_timeline.key_milestones
+        : mvpMilestones,
+    },
+    critical_path: ensureStringList(base.critical_path, [
+      'Finalize architecture and data model decisions',
+      'Complete core backend APIs before full frontend integration',
+      'Finish QA and performance checks before pilot launch',
+    ], 3, 8),
+    phases:
+      Array.isArray(base.phases) && base.phases.length >= 4
+        ? base.phases
+        : phases,
+    mvp_vs_post_mvp: {
+      mvp_focus: ensureStringList(base.mvp_vs_post_mvp?.mvp_focus, [
+        'Core user workflow completion',
+        'Instrumentation for activation and retention metrics',
+        'Reliable deployment and monitoring baseline',
+      ], 3, 6),
+      post_mvp_focus: ensureStringList(base.mvp_vs_post_mvp?.post_mvp_focus, [
+        'Advanced automation and personalization',
+        'Scale-oriented performance optimization',
+        'Secondary integrations and growth loops',
+      ], 3, 6),
+    },
+    assumptions: ensureStringList(base.assumptions, [
+      'Dependencies are resolved within planned phase boundaries.',
+      'Team availability is stable across MVP window.',
+      'Scope control is enforced through milestone gates.',
+    ], 3, 6),
+  };
+}
+
+function normalizeManpowerPlanning(
+  manpower: any,
+  normalizedFeedback: string,
+  existingResult: PartialStrategyResult,
+  context?: GenerationContext
+) {
+  const idea = deriveIdeaContext(normalizedFeedback, existingResult, context);
+  const features = Array.isArray(existingResult.feature_system)
+    ? existingResult.feature_system
+    : [];
+  const timeline = (existingResult.time_estimation || existingResult.time_planning || {}) as any;
+  const intake = getCostIntakeFromMetadata(existingResult);
+  const base = manpower && typeof manpower === 'object' ? { ...manpower } : {};
+
+  const needsAI = selectionIncludes(
+    intake?.feature_complexity?.ai_features ||
+      intake?.technical_complexity?.ai_ml_level ||
+      intake?.integrations_apis?.ai_apis,
+    ['yes', 'required', 'advanced', 'moderate', 'high', 'recommendation', 'ai']
+  ) || features.some((feature: any) =>
+    selectionIncludes(feature?.name || feature?.title, ['ai', 'recommend', 'predict'])
+  );
+
+  const highScale = selectionIncludes(
+    intake?.infrastructure_hosting?.hosting_scale || intake?.user_scale?.expected_users,
+    ['scale', 'high', '10k', '50k', '100k']
+  );
+
+  const leanTeam = [
+    { role: 'Product Manager', count: 1, seniority: 'Mid' },
+    { role: 'Full-Stack Engineer', count: 2, seniority: 'Senior' },
+    { role: 'UI/UX Designer', count: 1, seniority: 'Mid' },
+    { role: 'QA Engineer', count: 1, seniority: 'Mid' },
+  ];
+
+  const startupTeam = [
+    { role: 'Product Manager', count: 1, seniority: 'Senior' },
+    { role: 'Frontend Engineer', count: 2, seniority: 'Senior' },
+    { role: 'Backend Engineer', count: 2, seniority: 'Senior' },
+    { role: 'UI/UX Designer', count: 1, seniority: 'Mid' },
+    { role: 'QA Engineer', count: 1, seniority: 'Mid' },
+    { role: 'DevOps Engineer', count: 1, seniority: 'Mid' },
+  ];
+
+  const scaleTeam = [
+    ...startupTeam,
+    { role: 'Data/Analytics Engineer', count: 1, seniority: 'Senior' },
+    { role: 'Customer Success Lead', count: 1, seniority: 'Mid' },
+  ];
+
+  if (needsAI) {
+    leanTeam.push({ role: 'AI/ML Engineer', count: 1, seniority: 'Senior' });
+    startupTeam.push({ role: 'AI/ML Engineer', count: 1, seniority: 'Senior' });
+    scaleTeam.push({ role: 'AI/ML Engineer', count: 2, seniority: 'Senior' });
+  }
+
+  if (highScale) {
+    startupTeam.push({ role: 'SRE/DevOps Engineer', count: 1, seniority: 'Senior' });
+    scaleTeam.push({ role: 'SRE/DevOps Engineer', count: 2, seniority: 'Senior' });
+  }
+
+  const teamMode = intake?.development_factors?.team_mode || '';
+  const selectedTemplate = selectionIncludes(teamMode, ['solo', 'lean'])
+    ? leanTeam
+    : selectionIncludes(teamMode, ['full', 'scale'])
+    ? scaleTeam
+    : startupTeam;
+
+  const teamComposition = selectedTemplate.map((member) => {
+    const monthlyCost = getRoleMonthlyCost(member.role, member.seniority) * member.count;
+    return {
+      role: member.role,
+      seniority: member.seniority,
+      count: member.count,
+      monthly_cost_inr: monthlyCost,
+      responsibilities: ensureStringList([], [
+        `Own ${member.role.toLowerCase()} delivery quality`,
+        `Support ${idea.productName} milestone execution`,
+      ], 2, 4),
+      skills_required: ensureStringList([], [
+        'Domain and delivery experience',
+        'Collaboration across product and engineering',
+      ], 2, 4),
+      hiring_phase:
+        member.role.includes('Product') || member.role.includes('Designer')
+          ? 'Discovery + Design'
+          : member.role.includes('QA')
+          ? 'MVP Build + Testing'
+          : 'MVP Build',
+      must_have:
+        member.role.includes('Product') ||
+        member.role.includes('Engineer') ||
+        member.role.includes('Designer'),
+      why_needed:
+        member.role.includes('AI')
+          ? 'Needed to deliver AI/recommendation quality and model integration reliability.'
+          : member.role.includes('DevOps') || member.role.includes('SRE')
+          ? 'Needed to keep releases stable, observable, and scalable.'
+          : `Needed to deliver core ${idea.projectType} workflows on timeline.`,
+    };
+  });
+
+  const totalTeamSize = teamComposition.reduce((sum, member) => sum + (member.count || 0), 0);
+  const totalMonthlyCost = teamComposition.reduce(
+    (sum, member) => sum + (member.monthly_cost_inr || 0),
+    0
+  );
+
+  const mvpWeeks = Number(timeline?.mvp_timeline?.total_weeks || timeline?.total_weeks || 12);
+
+  const toCostOnly = (items: Array<{ role: string; count: number; seniority: string }>) =>
+    items.map((item) => ({
+      role: item.role,
+      count: item.count,
+      monthly_cost_inr: getRoleMonthlyCost(item.role, item.seniority) * item.count,
+    }));
+
+  return {
+    ...base,
+    team_composition: teamComposition,
+    total_team_size: totalTeamSize,
+    total_monthly_cost_inr: totalMonthlyCost,
+    hiring_plan:
+      normalizeWhitespace(base.hiring_plan || '') ||
+      `Hire core MVP squad in first 2 weeks, expand with scale roles after week ${Math.max(
+        6,
+        Math.round(mvpWeeks * 0.65)
+      )} once KPI signals are stable.`,
+    roles_rationale: teamComposition.map((member) => ({
+      role: member.role,
+      why_needed: member.why_needed,
+      must_have: member.must_have,
+      hiring_phase: member.hiring_phase,
+    })),
+    hiring_phases: [
+      {
+        phase: 'Phase 1 - Discovery & Design',
+        timeline: 'Weeks 1-3',
+        roles: teamComposition
+          .filter((member) => member.hiring_phase?.includes('Discovery'))
+          .map((member) => member.role),
+        notes: 'Lock requirements and UX direction early.',
+      },
+      {
+        phase: 'Phase 2 - MVP Build',
+        timeline: 'Weeks 3-10',
+        roles: teamComposition
+          .filter((member) => member.hiring_phase?.includes('MVP'))
+          .map((member) => member.role),
+        notes: 'Build priority workflows and integration backbone.',
+      },
+      {
+        phase: 'Phase 3 - Stabilization & Launch',
+        timeline: 'Weeks 10+',
+        roles: teamComposition
+          .filter((member) =>
+            member.hiring_phase?.includes('Testing') ||
+            member.role.includes('DevOps') ||
+            member.role.includes('SRE')
+          )
+          .map((member) => member.role),
+        notes: 'Focus on quality, reliability, and rollout readiness.',
+      },
+    ],
+    team_options: {
+      lean_team: toCostOnly(leanTeam),
+      startup_team: toCostOnly(startupTeam),
+      scale_team: toCostOnly(scaleTeam),
+    },
+    assumptions: ensureStringList(base.assumptions, [
+      'Hiring pipeline can staff critical roles in planned windows.',
+      'Role overlap is acceptable in early MVP stage.',
+      'Scale roles are activated after MVP validation.',
+    ], 3, 6),
+  };
+}
+
+function normalizeCostEstimation(
+  cost: any,
+  normalizedFeedback: string,
+  existingResult: PartialStrategyResult,
+  context?: GenerationContext
+) {
+  const model = estimateCostModel(normalizedFeedback, existingResult, context);
+  const base = cost && typeof cost === 'object' ? { ...cost } : {};
+
+  const clampToModelRange = (
+    value: unknown,
+    modelValue: number,
+    lowerMultiplier = 0.5,
+    upperMultiplier = 2.4
+  ) => {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) {
+      return modelValue;
+    }
+    const min = Math.round(modelValue * lowerMultiplier);
+    const max = Math.round(modelValue * upperMultiplier);
+    return Math.max(min, Math.min(max, Math.round(numeric)));
+  };
+
+  const developmentCost = clampToModelRange(base.development_cost, model.developmentCost, 0.55, 2.2);
+  const engineersCost = clampToModelRange(base.engineers_cost, model.teamMonthlyCost * 12, 0.55, 2.3);
+  const cloudCost = clampToModelRange(base.cloud_cost, model.cloudCostYearly, 0.45, 2.8);
+  const aiApiCost = clampToModelRange(base.ai_api_cost, model.aiApiCostYearly, 0.4, 3);
+  const toolsCost = clampToModelRange(base.tools_cost, model.toolsCostYearly, 0.45, 2.5);
+  const operationalCost = clampToModelRange(base.operational_cost, model.operationalCostYearly, 0.45, 2.5);
+  const modelTotal = Math.round(
+    developmentCost + cloudCost + aiApiCost + toolsCost + operationalCost
+  );
+  const totalFirstYear = clampToModelRange(
+    base.total_first_year || base.total_first_year_cost_inr,
+    modelTotal,
+    0.6,
+    2.35
+  );
+
+  const lowAnnual = clampToModelRange(base.low_budget_version?.annual_cost, model.lowAnnual, 0.6, 2);
+  const startupAnnual = clampToModelRange(base.startup_version?.annual_cost, model.startupAnnual, 0.6, 2.2);
+  const scaleAnnual = clampToModelRange(
+    base.scale_version?.annual_cost,
+    Math.max(model.scaleAnnual, startupAnnual + model.infraMonthly * 12),
+    0.65,
+    2.4
+  );
+  const normalizedStartupAnnual = Math.max(startupAnnual, lowAnnual + 120000);
+  const normalizedScaleAnnual = Math.max(scaleAnnual, normalizedStartupAnnual + 180000);
+
+  const confidence = selectionIncludes(
+    model.intake?.market_business?.target_market_size,
+    ['unknown', 'unclear', 'not sure']
+  )
+    ? 'Low'
+    : selectionIncludes(model.intake?.development_factors?.delivery_speed, ['aggressive'])
+    ? 'Medium'
+    : 'High';
+
+  return {
+    ...base,
+    development_cost: developmentCost,
+    engineers_cost: engineersCost,
+    cloud_cost: cloudCost,
+    ai_api_cost: aiApiCost,
+    tools_cost: toolsCost,
+    operational_cost: operationalCost,
+    total_first_year: totalFirstYear,
+    total_first_year_cost_inr: totalFirstYear,
+    break_even_analysis:
+      normalizeWhitespace(base.break_even_analysis || '') ||
+      `With the selected scope and pricing assumptions, break-even is plausible in ${model.breakEvenMonths}-${model.breakEvenMonths + 4} months if activation and retention KPIs stay on target.`,
+    low_budget_version: {
+      description:
+        base.low_budget_version?.description ||
+        'Lean MVP with strict scope control and minimal integrations.',
+      annual_cost: lowAnnual,
+    },
+    startup_version: {
+      description:
+        base.startup_version?.description ||
+        'Balanced startup build with moderate integrations and quality guardrails.',
+      annual_cost: normalizedStartupAnnual,
+    },
+    scale_version: {
+      description:
+        base.scale_version?.description ||
+        'Scale-ready architecture with higher reliability, performance, and support coverage.',
+      annual_cost: normalizedScaleAnnual,
+    },
+    assumptions: ensureStringList(base.assumptions, model.assumptions, 3, 8),
+    cost_drivers:
+      Array.isArray(base.cost_drivers) && base.cost_drivers.length > 0
+        ? base.cost_drivers
+        : model.costDrivers,
+    budget_ranges: {
+      currency: 'INR',
+      mvp: {
+        min: Math.round(lowAnnual * 0.82),
+        max: Math.round(normalizedStartupAnnual * 0.92),
+      },
+      startup: {
+        min: Math.round(normalizedStartupAnnual * 0.9),
+        max: Math.round(normalizedStartupAnnual * 1.15),
+      },
+      scale: {
+        min: Math.round(normalizedScaleAnnual * 0.9),
+        max: Math.round(normalizedScaleAnnual * 1.2),
+      },
+      ...(base.budget_ranges || {}),
+    },
+    team_implications: ensureStringList(base.team_implications, [
+      `Expected engineering burn is about ₹${Math.round(model.teamMonthlyCost / 1000)}K/month.`,
+      'Higher seniority accelerates delivery but increases monthly burn.',
+      'Role overlap is viable in MVP; specialization becomes necessary in growth phase.',
+    ], 3, 6),
+    infra_implications: ensureStringList(base.infra_implications, [
+      `Infrastructure baseline is about ₹${Math.round(model.infraMonthly / 1000)}K/month before growth spikes.`,
+      'Realtime and concurrency requirements are the biggest infra multipliers.',
+      'Autoscaling and observability should be introduced before scale phase.',
+    ], 3, 6),
+    maintenance_implications: ensureStringList(base.maintenance_implications, [
+      `Ongoing maintenance/support budget is roughly ₹${Math.round(model.maintenanceMonthly / 1000)}K/month.`,
+      'Support intensity rises after launch and should be planned explicitly.',
+      'Monitoring and incident response become critical once user scale grows.',
+    ], 3, 6),
+    confidence_level: (base.confidence_level || confidence) as string,
+    uncertainty_notes: ensureStringList(base.uncertainty_notes, [
+      'Final costs vary based on actual API usage and user growth pace.',
+      'Hiring lead time and contractor mix can shift team cost by 10-20%.',
+      'Compliance requirements can materially change infra and security spend.',
+    ], 3, 6),
+    break_even_months: Number(base.break_even_months) || model.breakEvenMonths,
+  };
+}
+
 function getMinimumProblemCount(input: string): number {
   return normalizeInput(input).length >= 80 ? MIN_RICH_PROBLEM_COUNT : 8;
 }
@@ -1029,6 +1925,37 @@ function getMinimumFeatureCount(input: string): number {
 function getTargetFeatureCount(input: string): number {
   const minimum = getMinimumFeatureCount(input);
   return minimum >= MIN_RICH_FEATURE_COUNT ? 12 : minimum;
+}
+
+function getMinimumTaskCount(
+  input: string,
+  existingResult: PartialStrategyResult
+): number {
+  const normalizedLength = normalizeInput(input).length;
+  const featureCount = Array.isArray(existingResult.feature_system)
+    ? existingResult.feature_system.length
+    : 0;
+  const base = normalizedLength >= 80 ? MIN_RICH_TASK_COUNT : 10;
+  const scopeBoost = Math.min(8, Math.round(featureCount / 2));
+  return Math.max(base, Math.min(32, base + scopeBoost));
+}
+
+function getTargetTaskCount(
+  input: string,
+  existingResult: PartialStrategyResult
+): number {
+  const minimum = getMinimumTaskCount(input, existingResult);
+  const featureCount = Array.isArray(existingResult.feature_system)
+    ? existingResult.feature_system.length
+    : 0;
+  const problemCount = Array.isArray(existingResult.problem_analysis)
+    ? existingResult.problem_analysis.length
+    : 0;
+  const complexityBoost = Math.min(6, Math.round(problemCount / 4));
+  return Math.max(
+    minimum,
+    Math.min(36, minimum + Math.round(featureCount * 0.65) + complexityBoost)
+  );
 }
 
 function normalizeProblemItem(problem: any, index: number, idea: IdeaContext): any {
@@ -1138,6 +2065,229 @@ function normalizeFeatureItem(feature: any, index: number, idea: IdeaContext): a
         : index % 2 === 0
         ? '1-2 weeks'
         : '4-7 days'),
+  };
+}
+
+function normalizeTaskType(value: unknown): string {
+  const normalized = normalizeWhitespace(String(value || '')).toLowerCase();
+  const allowedTypes = new Set([
+    'frontend',
+    'backend',
+    'ai',
+    'devops',
+    'design',
+    'testing',
+    'database',
+    'data',
+    'security',
+    'product',
+    'qa',
+  ]);
+  if (allowedTypes.has(normalized)) {
+    return normalized === 'qa' ? 'testing' : normalized;
+  }
+  return 'backend';
+}
+
+function normalizeTaskPriority(value: unknown): 'Critical' | 'High' | 'Medium' | 'Low' {
+  const normalized = normalizeWhitespace(String(value || '')).toLowerCase();
+  if (normalized === 'critical') return 'Critical';
+  if (normalized === 'high') return 'High';
+  if (normalized === 'low') return 'Low';
+  return 'Medium';
+}
+
+function getTaskOwnerRole(type: string): string {
+  switch (type) {
+    case 'frontend':
+      return 'Frontend Engineer';
+    case 'backend':
+      return 'Backend Engineer';
+    case 'ai':
+      return 'AI/ML Engineer';
+    case 'database':
+    case 'data':
+      return 'Data Engineer';
+    case 'devops':
+      return 'DevOps / SRE Engineer';
+    case 'design':
+      return 'Product Designer';
+    case 'testing':
+      return 'QA Engineer';
+    case 'security':
+      return 'Security Engineer';
+    case 'product':
+      return 'Product Manager';
+    default:
+      return 'Engineering Owner';
+  }
+}
+
+function getTaskTechStack(type: string): string[] {
+  switch (type) {
+    case 'frontend':
+      return ['Next.js', 'React', 'Tailwind CSS'];
+    case 'backend':
+      return ['Next.js Route Handlers', 'Supabase', 'TypeScript'];
+    case 'ai':
+      return ['Gemini API', 'Prompt orchestration', 'Evaluation harness'];
+    case 'database':
+    case 'data':
+      return ['PostgreSQL', 'Supabase', 'SQL migrations'];
+    case 'devops':
+      return ['CI/CD', 'Monitoring', 'Runtime observability'];
+    case 'design':
+      return ['Figma', 'Design system', 'Usability testing'];
+    case 'testing':
+      return ['Integration testing', 'E2E testing', 'Regression checks'];
+    case 'security':
+      return ['RBAC policies', 'Audit logging', 'Threat modeling'];
+    case 'product':
+      return ['Roadmap planning', 'KPIs', 'Experiment design'];
+    default:
+      return ['TypeScript', 'Supabase', 'Gemini API'];
+  }
+}
+
+function getDefaultTaskSteps(type: string, title: string, idea: IdeaContext): string[] {
+  const generic = [
+    `Define implementation scope for "${title}" with clear acceptance criteria.`,
+    'Implement production-ready code path with validations and edge-case handling.',
+    'Add automated tests and telemetry for success/failure paths.',
+    `Document rollout notes and handoff details for ${idea.productName}.`,
+  ];
+
+  switch (type) {
+    case 'frontend':
+      return [
+        `Design user flow and UI states for "${title}".`,
+        'Implement responsive components and loading/error states.',
+        'Connect frontend to typed APIs and track key interaction events.',
+        'Verify accessibility, visual consistency, and edge-case behavior.',
+      ];
+    case 'backend':
+      return [
+        `Define service contracts and API schema for "${title}".`,
+        'Implement endpoints, validation, and robust error handling.',
+        'Add persistence/query optimizations and idempotency safeguards.',
+        'Add integration tests and observability instrumentation.',
+      ];
+    case 'ai':
+      return [
+        `Define prompt strategy and ranking logic for "${title}".`,
+        'Implement Gemini orchestration with deterministic fallback handling.',
+        'Create evaluation dataset and quality checks for recommendation output.',
+        'Instrument latency, token usage, and quality metrics.',
+      ];
+    case 'database':
+    case 'data':
+      return [
+        `Design schema/events required for "${title}".`,
+        'Create migrations, indexes, and retention strategy.',
+        'Backfill/seed data and validate integrity constraints.',
+        'Add monitoring for data quality and query performance.',
+      ];
+    case 'devops':
+      return [
+        `Define deployment and runtime requirements for "${title}".`,
+        'Implement CI/CD checks, environment configuration, and secrets handling.',
+        'Add logging, metrics, tracing, and alert thresholds.',
+        'Run load/failure drills and document response playbooks.',
+      ];
+    case 'testing':
+      return [
+        `Define test matrix for "${title}" across happy and edge paths.`,
+        'Implement automated API/UI/regression tests with stable fixtures.',
+        'Execute manual exploratory tests for critical risk scenarios.',
+        'Publish defect report and release sign-off criteria.',
+      ];
+    default:
+      return generic;
+  }
+}
+
+function normalizeTaskItem(
+  task: any,
+  index: number,
+  idea: IdeaContext,
+  featureTitles: string[]
+): any {
+  const type = normalizeTaskType(task?.type);
+  const fallbackFeature = featureTitles[index % Math.max(featureTitles.length, 1)] || 'Core workflow';
+  const title =
+    normalizeWhitespace(task?.title || '') ||
+    `Implement ${fallbackFeature} workflow`;
+  const description =
+    normalizeWhitespace(task?.description || '') ||
+    `Build and validate "${title}" so ${idea.targetUsers} can achieve measurable outcomes in ${idea.productName}.`;
+  const detailedSteps = ensureStringList(
+    task?.detailed_steps,
+    getDefaultTaskSteps(type, title, idea),
+    4,
+    8
+  );
+  const deliverables = ensureStringList(
+    task?.deliverables,
+    [
+      `Production-ready implementation for ${title}`,
+      'Automated tests and observability coverage',
+      'Updated documentation and rollout checklist',
+    ],
+    2,
+    6
+  );
+  const doneCriteria = ensureStringList(
+    task?.done_criteria,
+    [
+      'Feature passes defined acceptance criteria',
+      'No blocking defects in critical user flows',
+      'Monitoring/alerts are configured for rollout',
+    ],
+    2,
+    6
+  );
+
+  return {
+    ...task,
+    id:
+      normalizeWhitespace(task?.id || '').toUpperCase() ||
+      `TASK-${String(index + 1).padStart(3, '0')}`,
+    title,
+    description,
+    why_this_task_matters:
+      normalizeWhitespace(task?.why_this_task_matters || '') ||
+      `This task directly impacts delivery confidence and user-perceived value for ${idea.productName}.`,
+    type,
+    owner_role:
+      normalizeWhitespace(task?.owner_role || '') || getTaskOwnerRole(type),
+    priority: normalizeTaskPriority(task?.priority),
+    estimated_time:
+      normalizeWhitespace(task?.estimated_time || '') ||
+      (type === 'ai' || type === 'backend'
+        ? '3-5 days'
+        : type === 'frontend'
+        ? '2-4 days'
+        : '2-3 days'),
+    tech_stack: ensureStringList(task?.tech_stack, getTaskTechStack(type), 2, 6),
+    linked_features: ensureStringList(
+      task?.linked_features,
+      [fallbackFeature],
+      1,
+      5
+    ),
+    section_dependencies: ensureStringList(
+      task?.section_dependencies,
+      ['Feature System', 'PRD', 'Timeline', 'Manpower Planning'],
+      2,
+      6
+    ),
+    dependencies: ensureStringList(task?.dependencies, [], 0, 8),
+    detailed_steps: detailedSteps,
+    deliverables: deliverables,
+    done_criteria: doneCriteria,
+    expected_output:
+      normalizeWhitespace(task?.expected_output || '') ||
+      deliverables[0],
   };
 }
 
@@ -1385,6 +2535,151 @@ function ensureMinimumFeatureCount(
   }
 
   return unique;
+}
+
+function ensureMinimumDevelopmentTaskCount(
+  tasks: any[],
+  normalizedFeedback: string,
+  existingResult: PartialStrategyResult,
+  context?: GenerationContext
+): any[] {
+  const idea = deriveIdeaContext(normalizedFeedback, existingResult, context);
+  const normalizedFeatures = ensureMinimumFeatureCount(
+    Array.isArray(existingResult.feature_system) ? existingResult.feature_system : [],
+    normalizedFeedback,
+    existingResult,
+    context
+  );
+  const featureTitles = normalizedFeatures
+    .slice(0, 20)
+    .map((feature: any) =>
+      normalizeWhitespace(
+        `${feature?.id || ''} ${stripIdPrefix(feature?.name || feature?.title || '')}`
+      )
+    )
+    .filter(Boolean);
+
+  const minimum = getMinimumTaskCount(normalizedFeedback, existingResult);
+  const desiredCount = Math.max(minimum, getTargetTaskCount(normalizedFeedback, existingResult));
+  const normalized = (Array.isArray(tasks) ? tasks : []).map((task, index) =>
+    normalizeTaskItem(task, index, idea, featureTitles)
+  );
+
+  const unique = normalized.filter((task, index, all) => {
+    const key = (task.title || '').toLowerCase();
+    return all.findIndex((item) => (item.title || '').toLowerCase() === key) === index;
+  });
+
+  const timeline = (existingResult.time_estimation || existingResult.time_planning || {}) as any;
+  const phaseNames = Array.isArray(timeline?.phases)
+    ? timeline.phases
+        .map((phase: any) => normalizeWhitespace(phase?.phase_name || ''))
+        .filter(Boolean)
+    : [];
+
+  const fallbackBlueprints = [
+    { title: 'Finalize technical architecture and delivery boundaries', type: 'product', priority: 'Critical' },
+    { title: 'Design canonical data model and migration plan', type: 'database', priority: 'Critical' },
+    { title: 'Implement authentication, RBAC, and session hardening', type: 'security', priority: 'Critical' },
+    { title: 'Build core backend APIs for {feature}', type: 'backend', priority: 'Critical' },
+    { title: 'Implement frontend workflow for {feature}', type: 'frontend', priority: 'High' },
+    { title: 'Build AI recommendation orchestration for {feature}', type: 'ai', priority: 'High' },
+    { title: 'Implement job/market data ingestion and normalization', type: 'data', priority: 'High' },
+    { title: 'Create integrations layer for external providers', type: 'backend', priority: 'High' },
+    { title: 'Instrument product analytics and event taxonomy', type: 'data', priority: 'High' },
+    { title: 'Implement experimentation and model-quality tracking', type: 'ai', priority: 'Medium' },
+    { title: 'Add end-to-end and regression test coverage', type: 'testing', priority: 'High' },
+    { title: 'Establish release pipeline and environment promotion', type: 'devops', priority: 'High' },
+    { title: 'Implement observability, alerting, and incident runbooks', type: 'devops', priority: 'High' },
+    { title: 'Perform security review, threat model, and remediation', type: 'security', priority: 'Medium' },
+    { title: 'Run launch readiness, UAT, and rollback drills', type: 'testing', priority: 'Medium' },
+    { title: 'Post-launch optimization for activation and retention', type: 'product', priority: 'Medium' },
+  ];
+
+  let cursor = unique.length;
+  while (unique.length < desiredCount) {
+    const blueprint = fallbackBlueprints[cursor % fallbackBlueprints.length];
+    const featureRef =
+      featureTitles[cursor % Math.max(featureTitles.length, 1)] || 'Core product workflow';
+    const phaseRef = phaseNames[cursor % Math.max(phaseNames.length, 1)] || 'MVP Build';
+    const id = `TASK-${String(cursor + 1).padStart(3, '0')}`;
+    const dependencyId =
+      cursor > 0 ? `TASK-${String(cursor).padStart(3, '0')}` : undefined;
+
+    const title = blueprint.title.includes('{feature}')
+      ? blueprint.title.replace('{feature}', stripIdPrefix(featureRef))
+      : blueprint.title;
+
+    const candidate = normalizeTaskItem(
+      {
+        id,
+        title,
+        type: blueprint.type,
+        priority: blueprint.priority,
+        linked_features: [featureRef],
+        section_dependencies: ['Feature System', 'PRD', 'Timeline', 'Manpower Planning'],
+        dependencies: dependencyId ? [dependencyId] : [],
+        why_this_task_matters: `This work enables ${idea.productName} delivery in the ${phaseRef} phase without blocking downstream milestones.`,
+      },
+      cursor,
+      idea,
+      featureTitles
+    );
+
+    if (!unique.some((task) => task.title.toLowerCase() === candidate.title.toLowerCase())) {
+      unique.push(candidate);
+    }
+    cursor += 1;
+  }
+
+  const withReindexedIds = unique.map((task, index) => ({
+    ...task,
+    __old_id: normalizeWhitespace(task.id || '').toUpperCase(),
+    id: `TASK-${String(index + 1).padStart(3, '0')}`,
+  }));
+
+  const idMap = new Map<string, string>();
+  const titleToIdMap = new Map<string, string>();
+
+  for (const task of withReindexedIds) {
+    if (task.__old_id) {
+      idMap.set(task.__old_id, task.id);
+    }
+    titleToIdMap.set((task.title || '').toLowerCase(), task.id);
+  }
+
+  return withReindexedIds.map((task) => {
+    const dependencies = ensureStringList(task.dependencies, [], 0, 8)
+      .map((dependency) => {
+        const normalizedDependency = normalizeWhitespace(dependency);
+        const upperDependency = normalizedDependency.toUpperCase();
+        if (idMap.has(upperDependency)) {
+          return idMap.get(upperDependency) as string;
+        }
+        if (titleToIdMap.has(normalizedDependency.toLowerCase())) {
+          return titleToIdMap.get(normalizedDependency.toLowerCase()) as string;
+        }
+        return upperDependency.startsWith('TASK-') ? upperDependency : normalizedDependency;
+      })
+      .filter((dependency, index, all) =>
+        dependency && dependency !== task.id && all.indexOf(dependency) === index
+      )
+      .slice(0, 6);
+
+    const normalizedTask = {
+      ...task,
+      dependencies,
+      linked_features: ensureStringList(task.linked_features, featureTitles, 1, 5),
+      section_dependencies: ensureStringList(
+        task.section_dependencies,
+        ['Feature System', 'PRD', 'Timeline', 'Manpower Planning'],
+        2,
+        6
+      ),
+    };
+    delete (normalizedTask as any).__old_id;
+    return normalizedTask;
+  });
 }
 
 function ensurePrdCompleteness(
@@ -1990,7 +3285,12 @@ export async function generateOverviewAnalysis(
   const parsed = safeParseJSON<any>(content);
   const result = createEmptyResult(normalizedFeedback, context, analysisId);
 
-  result.executive_dashboard = parsed.executive_dashboard;
+  result.executive_dashboard = normalizeExecutiveDashboard(
+    parsed.executive_dashboard,
+    normalizedFeedback,
+    result,
+    context
+  );
   result.overview_summary = parsed.overview_summary || parsed.overview || null;
 
   stampMetadata(result, OVERVIEW_SECTION_IDS, provider, Date.now() - startedAt);
@@ -2070,27 +3370,61 @@ export async function generateDeferredStrategySection(
       result.system_design = parsed.system_design;
       break;
     case 'development-tasks':
-      result.development_tasks = parsed.development_tasks || [];
+      result.development_tasks = ensureMinimumDevelopmentTaskCount(
+        parsed.development_tasks || [],
+        normalizedFeedback,
+        result,
+        context
+      );
       break;
     case 'execution-roadmap':
       result.execution_roadmap = parsed.execution_roadmap;
       break;
     case 'manpower-planning':
-      result.manpower_planning = parsed.manpower_planning;
+      result.manpower_planning = normalizeManpowerPlanning(
+        parsed.manpower_planning,
+        normalizedFeedback,
+        result,
+        context
+      );
       break;
     case 'resources':
       result.resource_requirements = parsed.resource_requirements;
       break;
     case 'cost-estimation':
-      result.cost_estimation = parsed.cost_estimation;
-      result.cost_planning = parsed.cost_estimation;
+      result.cost_estimation = normalizeCostEstimation(
+        parsed.cost_estimation,
+        normalizedFeedback,
+        result,
+        context
+      );
+      result.cost_planning = result.cost_estimation;
       break;
     case 'timeline':
-      result.time_estimation = parsed.time_estimation;
-      result.time_planning = parsed.time_estimation;
+      result.time_estimation = normalizeTimelineEstimation(
+        parsed.time_estimation,
+        normalizedFeedback,
+        result,
+        context
+      );
+      result.time_planning = result.time_estimation;
       break;
     case 'impact-analysis':
-      result.impact_analysis = parsed.impact_analysis;
+      result.impact_analysis = {
+        ...(parsed.impact_analysis || {}),
+        user_impact_score: normalizeTenPointScore(
+          parsed.impact_analysis?.user_impact_score,
+          7.2
+        ),
+        business_impact_score: normalizeTenPointScore(
+          parsed.impact_analysis?.business_impact_score,
+          7.1
+        ),
+        confidence_score: normalizeConfidenceScore(
+          parsed.impact_analysis?.confidence_score,
+          0.68
+        ),
+      };
       break;
   }
 

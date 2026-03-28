@@ -1,13 +1,11 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   FolderKanban,
   Calendar,
-  Users,
   Sparkles,
-  TrendingUp,
   Target,
   Zap,
   ArrowUpRight,
@@ -34,6 +32,13 @@ export default function DashboardClient({ user, profile }: DashboardClientProps)
   const { projects, loading, error, needsSetup, fetchProjects, createProject, deleteProject, projectCount } = useProjects()
   const { showToast } = useToast()
   const [showCreateModal, setShowCreateModal] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+
+  const filteredProjects = useMemo(() => {
+    if (!searchQuery.trim()) return projects
+    const normalized = searchQuery.trim().toLowerCase()
+    return projects.filter((project) => project.name.toLowerCase().includes(normalized))
+  }, [projects, searchQuery])
 
   const handleCreateProject = async (name: string, description?: string) => {
     const result = await createProject(name, description)
@@ -93,9 +98,15 @@ export default function DashboardClient({ user, profile }: DashboardClientProps)
   if (needsSetup) {
     return (
       <div className="flex min-h-screen bg-gray-50 dark:bg-gray-950">
-        <PremiumSidebar projectCount={0} />
+        <PremiumSidebar />
         <div className="flex-1 flex flex-col min-w-0">
-          <PremiumNavbar user={user} onCreateProject={() => {}} />
+          <PremiumNavbar
+            user={user}
+            projects={projects}
+            searchQuery={searchQuery}
+            onSearchQueryChange={setSearchQuery}
+            onCreateProject={() => {}}
+          />
           <main className="flex-1 p-8 overflow-y-auto">
             <DatabaseSetup onRefresh={fetchProjects} />
           </main>
@@ -107,12 +118,18 @@ export default function DashboardClient({ user, profile }: DashboardClientProps)
   return (
     <div className="flex min-h-screen bg-gradient-to-br from-gray-50 via-gray-50 to-gray-100 dark:from-gray-950 dark:via-gray-950 dark:to-gray-900">
       {/* Premium Sidebar */}
-      <PremiumSidebar projectCount={projectCount} />
+      <PremiumSidebar />
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Premium Navbar */}
-        <PremiumNavbar user={user} onCreateProject={() => setShowCreateModal(true)} />
+        <PremiumNavbar
+          user={user}
+          projects={projects}
+          searchQuery={searchQuery}
+          onSearchQueryChange={setSearchQuery}
+          onCreateProject={() => setShowCreateModal(true)}
+        />
 
         {/* Page Content */}
         <main className="flex-1 p-8 overflow-y-auto">
@@ -255,8 +272,8 @@ export default function DashboardClient({ user, profile }: DashboardClientProps)
                 <div>
                   <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Your Projects</h2>
                   <p className="text-gray-500 dark:text-gray-400 mt-1">
-                    {projectCount > 0
-                      ? `${projectCount} project${projectCount > 1 ? 's' : ''} ready for AI analysis`
+                    {filteredProjects.length > 0
+                      ? `${filteredProjects.length} project${filteredProjects.length > 1 ? 's' : ''}${searchQuery ? ` matching "${searchQuery}"` : ''}`
                       : 'Get started by creating your first project'}
                   </p>
                 </div>
@@ -335,14 +352,27 @@ export default function DashboardClient({ user, profile }: DashboardClientProps)
                 </motion.div>
               )}
 
+              {!loading && !error && projects.length > 0 && filteredProjects.length === 0 && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="text-center py-16 rounded-2xl border border-dashed border-gray-300 dark:border-gray-700"
+                >
+                  <p className="text-lg font-semibold text-gray-900 dark:text-white">No matching projects</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
+                    Try a different project name in search.
+                  </p>
+                </motion.div>
+              )}
+
               {/* Projects Grid - Premium Cards */}
-              {!loading && !error && projects.length > 0 && (
+              {!loading && !error && filteredProjects.length > 0 && (
                 <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
                 >
-                  {projects.map((project, index) => (
+                  {filteredProjects.map((project, index) => (
                     <PremiumProjectCard
                       key={project.id}
                       project={project}
