@@ -96,6 +96,28 @@ interface ProjectOutputClientProps {
   initialInput: string
   outputLength: OutputLength
   shouldGenerate: boolean
+  initialAnalysis?: Partial<ComprehensiveStrategyResult> | null
+  initialAnalysisId?: string | null
+}
+
+type AnalysisResultState = Partial<ComprehensiveStrategyResult> & {
+  metadata?: {
+    analysis_id?: string
+    provider?: string
+    generated_sections?: string[]
+    section_providers?: Record<string, string>
+    source_input?: string
+    detail_level?: string
+    input_hash?: string
+    section_input_hashes?: Record<string, string>
+    stale_sections?: string[]
+    saved_analysis_id?: string
+    [key: string]: any
+  }
+  saved_id?: string
+  provider?: string
+  generation_mode?: string
+  time_planning?: any
 }
 
 export default function ProjectOutputClient({
@@ -104,6 +126,8 @@ export default function ProjectOutputClient({
   initialInput,
   outputLength,
   shouldGenerate,
+  initialAnalysis,
+  initialAnalysisId,
 }: ProjectOutputClientProps) {
   const router = useRouter()
   const { showToast } = useToast()
@@ -115,8 +139,17 @@ export default function ProjectOutputClient({
   const [activeSection, setActiveSection] = useState<SectionId>('all')
   const [isGenerating, setIsGenerating] = useState(false)
   const [generationProgress, setGenerationProgress] = useState('')
-  const [analysisResult, setAnalysisResult] = useState<ComprehensiveStrategyResult | null>(null)
+  const [analysisResult, setAnalysisResult] = useState<AnalysisResultState | null>(
+    shouldGenerate ? null : (initialAnalysis as AnalysisResultState | null) || null
+  )
+  const [analysisId, setAnalysisId] = useState<string | null>(
+    initialAnalysisId ||
+      (initialAnalysis as AnalysisResultState | null)?.metadata?.saved_analysis_id ||
+      (initialAnalysis as AnalysisResultState | null)?.saved_id ||
+      null
+  )
   const [error, setError] = useState<string | null>(null)
+  const [loadingSections, setLoadingSections] = useState<Partial<Record<SectionId, boolean>>>({})
 
   // Chat state - Right side panel with fullscreen mode
   const [chatPanelOpen, setChatPanelOpen] = useState(false)
@@ -134,12 +167,87 @@ export default function ProjectOutputClient({
   const requestIdRef = useRef<string | null>(null)
   const mountedRef = useRef(false)
   const hasGeneratedRef = useRef(false) // Track if we've ever generated in this session
+  const sectionRequestRef = useRef<Set<SectionId>>(new Set())
+
+  const isOverviewReady = useCallback((result: AnalysisResultState | null) => {
+    if (!result) return false
+    return Boolean(
+      result.executive_dashboard ||
+      (result as any).overview_summary
+    )
+  }, [])
+
+  const hasSectionContent = useCallback((section: SectionId, result: AnalysisResultState | null = analysisResult) => {
+    if (!result) return false
+
+    switch (section) {
+      case 'all':
+        return isOverviewReady(result)
+      case 'executive-dashboard':
+        return !!result.executive_dashboard
+      case 'problem-analysis':
+        return Array.isArray(result.problem_analysis) && result.problem_analysis.length > 0
+      case 'feature-system':
+        return Array.isArray(result.feature_system) && result.feature_system.length > 0
+      case 'gaps-opportunities':
+        return !!result.gaps_opportunities
+      case 'prd':
+        return !!result.prd
+      case 'system-design':
+        return !!result.system_design
+      case 'development-tasks':
+        return Array.isArray(result.development_tasks) && result.development_tasks.length > 0
+      case 'execution-roadmap':
+        return !!result.execution_roadmap
+      case 'manpower-planning':
+        return !!result.manpower_planning
+      case 'resources':
+        return !!result.resource_requirements
+      case 'cost-estimation':
+        return !!result.cost_estimation
+      case 'timeline':
+        return !!result.time_estimation || !!result.time_planning
+      case 'impact-analysis':
+        return !!result.impact_analysis
+      default:
+        return false
+    }
+  }, [analysisResult, isOverviewReady])
+
+  const isSectionFresh = useCallback(
+    (section: SectionId, result: AnalysisResultState | null = analysisResult) => {
+      if (!result || !hasSectionContent(section, result)) {
+        return false
+      }
+
+      if (
+        section === 'all' ||
+        section === 'executive-dashboard'
+      ) {
+        return true
+      }
+
+      const inputHash = result.metadata?.input_hash
+      const sectionInputHash = result.metadata?.section_input_hashes?.[section]
+      const isStale = result.metadata?.stale_sections?.includes(section) === true
+
+      if (!inputHash || !sectionInputHash) {
+        return !isStale
+      }
+
+      return sectionInputHash === inputHash && !isStale
+    },
+    [analysisResult, hasSectionContent]
+  )
 
   // Clean URL after generation to prevent re-triggers on refresh/navigation
-  const cleanUrlParams = useCallback(() => {
+  const cleanUrlParams = useCallback((savedAnalysisId?: string | null) => {
     if (typeof window !== 'undefined') {
       const url = new URL(window.location.href)
       url.searchParams.delete('generate')
+      if (savedAnalysisId) {
+        url.searchParams.set('analysis', savedAnalysisId)
+      }
       window.history.replaceState({}, '', url.toString())
       console.log('[PMCopilot] Cleaned URL params - removed generate flag')
     }
@@ -181,7 +289,7 @@ export default function ProjectOutputClient({
       handleGenerate(reqId)
     } else if (shouldGenerate && (generationStartedRef.current || hasGeneratedRef.current)) {
       console.log('[PMCopilot] Generation already started/completed, skipping duplicate trigger')
-      cleanUrlParams() // Clean URL even if we skip
+      cleanUrlParams(analysisId) // Clean URL even if we skip
     }
 
     // Cleanup: Reset on unmount
@@ -208,7 +316,7 @@ export default function ProjectOutputClient({
 
     setIsGenerating(true)
     setError(null)
-    setGenerationProgress('Starting AI analysis...')
+    setGenerationProgress('Generating Gemini overview...')
     console.log(`[PMCopilot] API call starting (${reqId})`, {
       inputLength: initialInput.length,
       outputLength,
@@ -223,9 +331,10 @@ export default function ProjectOutputClient({
           'X-Request-Id': reqId, // Pass request ID for server-side logging
         },
         body: JSON.stringify({
-          feedback: initialInput,
+          feedback: initialInput.trim(),
           project_id: project.id,
           detail_level: outputLength,
+          reuse_cached: true,
           context: {
             project_name: project.name,
             project_context: project.description,
@@ -244,12 +353,17 @@ export default function ProjectOutputClient({
         throw new Error(result.error || 'Analysis failed')
       }
 
-      // The API returns the result directly, not nested
       const analysisData = result.data || result
+      const savedId =
+        analysisData.saved_id ||
+        analysisData.metadata?.saved_analysis_id ||
+        result.saved_id ||
+        null
+
       setAnalysisResult(analysisData)
+      setAnalysisId(savedId)
       setGenerationProgress('')
       
-      // Log which provider generated the output
       const provider = analysisData.provider || result.provider || 'unknown'
       console.log(`[PMCopilot] Analysis complete (${reqId})`, {
         provider,
@@ -258,10 +372,14 @@ export default function ProjectOutputClient({
         tasksCount: analysisData.development_tasks?.length || 0,
       })
       
-      showToast(`Analysis complete! (via ${provider})`, 'success')
+      showToast(
+        provider === 'gemini'
+          ? 'Gemini overview is ready. Open any section to generate only that section.'
+          : `Analysis complete!`,
+        'success'
+      )
       
-      // Clean URL params after successful generation
-      cleanUrlParams()
+      cleanUrlParams(savedId)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Analysis failed'
       console.error(`[PMCopilot] Analysis error (${reqId}):`, message)
@@ -271,12 +389,168 @@ export default function ProjectOutputClient({
       generationStartedRef.current = false
       hasGeneratedRef.current = false // Allow retry
       
-      // Still clean URL to prevent refresh re-trigger
-      cleanUrlParams()
+      cleanUrlParams(analysisId)
     } finally {
       setIsGenerating(false)
     }
   }
+
+  const loadSection = useCallback(async (section: SectionId) => {
+    if (
+      section === 'all' ||
+      section === 'executive-dashboard'
+    ) {
+      return
+    }
+
+    if (!analysisId) {
+      showToast('Generate the Gemini overview first', 'error')
+      return
+    }
+
+    if (isSectionFresh(section) || loadingSections[section] || sectionRequestRef.current.has(section)) {
+      return
+    }
+
+    sectionRequestRef.current.add(section)
+    setLoadingSections(prev => ({ ...prev, [section]: true }))
+    setGenerationProgress(`Generating ${SECTIONS.find(s => s.id === section)?.label || section} with Gemini...`)
+
+    try {
+      const requestPayload = {
+        section,
+        analysis_id: analysisId,
+        feedback: initialInput.trim() || undefined,
+        force: false,
+        detail_level: outputLength,
+        context: {
+          project_name: project.name,
+          project_context: project.description,
+        },
+      }
+
+      const endpoints = [
+        `/api/analyze/${analysisId}/section`,
+        '/api/analyze/section',
+      ]
+
+      let payload: any = null
+      let provider = 'gemini'
+      let resolvedAnalysisId = analysisId
+      let updatedResult: AnalysisResultState | null = null
+
+      for (let index = 0; index < endpoints.length; index++) {
+        const endpoint = endpoints[index]
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Request-Id': `section-${Date.now()}-${section}`,
+          },
+          body: JSON.stringify(requestPayload),
+        })
+
+        const contentType = response.headers.get('content-type') || ''
+        payload = contentType.includes('application/json')
+          ? await response.json().catch(() => ({}))
+          : {}
+
+        if (response.ok && payload.success !== false) {
+          provider = payload.data?.provider || payload.provider || 'gemini'
+          resolvedAnalysisId = payload.data?.analysis_id || analysisId
+          updatedResult = (payload.data?.result || payload.result || null) as AnalysisResultState | null
+          break
+        }
+
+        const message =
+          payload?.error ||
+          payload?.message ||
+          `Failed to generate ${section} (status ${response.status})`
+
+        if (response.status === 404 && index === 0) {
+          console.warn(`[PMCopilot] Primary section route 404, falling back to /api/analyze/section for ${section}`)
+          continue
+        }
+
+        throw new Error(message)
+      }
+
+      if (!updatedResult) {
+        throw new Error(`Failed to generate ${section}`)
+      }
+
+      if (!hasSectionContent(section, updatedResult)) {
+        throw new Error(
+          `${SECTIONS.find(s => s.id === section)?.label || section} generation returned empty data. Please retry.`
+        )
+      }
+
+      setAnalysisResult(updatedResult)
+      setAnalysisId(resolvedAnalysisId)
+      cleanUrlParams(resolvedAnalysisId)
+
+      showToast(`${SECTIONS.find(s => s.id === section)?.label || section} generated via ${provider}`, 'success')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : `Failed to generate ${section}`
+      console.error(`[PMCopilot] Section generation error (${section}):`, message)
+      showToast(message, 'error')
+    } finally {
+      sectionRequestRef.current.delete(section)
+      setLoadingSections(prev => ({ ...prev, [section]: false }))
+      setGenerationProgress('')
+    }
+  }, [analysisId, cleanUrlParams, hasSectionContent, initialInput, isSectionFresh, loadingSections, outputLength, project.description, project.name, showToast])
+
+  const handleSectionChange = useCallback((section: SectionId) => {
+    setActiveSection(section)
+
+    if (!isSectionFresh(section)) {
+      void loadSection(section)
+    }
+  }, [isSectionFresh, loadSection])
+
+  const buildChatAnalysisContext = useCallback((result: AnalysisResultState | null) => {
+    if (!result) {
+      return null
+    }
+
+    return {
+      executive_dashboard: result.executive_dashboard
+        ? {
+            key_insight: result.executive_dashboard.key_insight,
+            recommended_strategy: result.executive_dashboard.recommended_strategy,
+          }
+        : null,
+      problem_analysis: (result.problem_analysis || []).slice(0, 8).map((problem) => ({
+        id: problem.id,
+        title: problem.title,
+        severity_score: problem.severity_score,
+        business_impact: problem.business_impact,
+      })),
+      feature_system: (result.feature_system || []).slice(0, 10).map((feature) => ({
+        id: feature.id,
+        name: feature.name || feature.title,
+        category: feature.category,
+        complexity: feature.complexity,
+        user_value: feature.user_value,
+      })),
+      prd: result.prd || null,
+      development_tasks: (result.development_tasks || []).slice(0, 12).map((task) => ({
+        id: task.id,
+        title: task.title,
+        priority: task.priority,
+        estimated_time: task.estimated_time,
+      })),
+      manpower_planning: result.manpower_planning || null,
+      cost_estimation: result.cost_estimation || null,
+      time_estimation: result.time_estimation || result.time_planning || null,
+      impact_analysis: result.impact_analysis || null,
+      metadata: {
+        input_hash: result.metadata?.input_hash,
+        detail_level: result.metadata?.detail_level,
+      },
+    }
+  }, [])
 
   const handleChatSubmit = async () => {
     if (!chatInput.trim() || isChatStreaming) return
@@ -290,19 +564,19 @@ export default function ProjectOutputClient({
     setIsChatStreaming(true)
 
     try {
-      // Build context from current analysis
-      const context = analysisResult
-        ? `Current analysis includes: ${analysisResult.problem_analysis?.length || 0} problems, ${analysisResult.feature_system?.length || 0} features, ${analysisResult.development_tasks?.length || 0} tasks.`
-        : ''
+      const analysisContext = buildChatAnalysisContext(analysisResult)
 
       const response = await fetch('/api/chat-first', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: `${context}\n\nUser question: ${userMessage}`,
+          message: userMessage,
           depth: 'medium',
           section: activeSection,
           projectId: project.id,
+          projectName: project.name,
+          projectIdea: analysisResult?.metadata?.source_input || initialInput || '',
+          analysis: analysisContext,
           history: chatMessages.slice(-6),
         }),
       })
@@ -471,14 +745,21 @@ export default function ProjectOutputClient({
       if (typeof analysisResult.prd === 'string') {
         content += `${analysisResult.prd}\n\n`
       } else {
-        if (analysisResult.prd.vision) {
-          content += `### Vision\n${analysisResult.prd.vision}\n\n`
+        const productOverview = (analysisResult.prd as any).product_overview || {}
+        if (productOverview.product_name) {
+          content += `### Product Name\n${productOverview.product_name}\n\n`
         }
-        if (analysisResult.prd.mission) {
-          content += `### Mission\n${analysisResult.prd.mission}\n\n`
+        if (productOverview.one_line_summary) {
+          content += `### One-line Summary\n${productOverview.one_line_summary}\n\n`
         }
-        if (analysisResult.prd.problem_statement) {
-          content += `### Problem Statement\n${analysisResult.prd.problem_statement}\n\n`
+        if (productOverview.vision || analysisResult.prd.vision) {
+          content += `### Vision\n${productOverview.vision || analysisResult.prd.vision}\n\n`
+        }
+        if (analysisResult.prd.mission || productOverview.one_line_summary) {
+          content += `### Mission\n${analysisResult.prd.mission || productOverview.one_line_summary}\n\n`
+        }
+        if (productOverview.problem_statement || analysisResult.prd.problem_statement) {
+          content += `### Problem Statement\n${productOverview.problem_statement || analysisResult.prd.problem_statement}\n\n`
         }
       }
     }
@@ -560,7 +841,7 @@ export default function ProjectOutputClient({
         content += `**Total Weeks:** ${analysisResult.time_planning.mvp_timeline.total_weeks}\n\n`
         if (analysisResult.time_planning.mvp_timeline.key_milestones) {
           content += `**Key Milestones:**\n`
-          analysisResult.time_planning.mvp_timeline.key_milestones.forEach((milestone, index) => {
+          analysisResult.time_planning.mvp_timeline.key_milestones.forEach((milestone: any, index: number) => {
             content += `${index + 1}. Week ${milestone.week}: ${milestone.milestone}\n`
           })
           content += `\n`
@@ -748,6 +1029,10 @@ ${content
       return <GeneratingState progress={generationProgress} />
     }
 
+    if (activeSection !== 'all' && loadingSections[activeSection]) {
+      return <GeneratingState progress={generationProgress} />
+    }
+
     if (error) {
       return <ErrorState message={error} onRetry={handleGenerate} />
     }
@@ -757,9 +1042,18 @@ ${content
     }
 
     // Defensive check: ensure key data structures are arrays
-    const hasValidData = 
-      Array.isArray(analysisResult.problem_analysis) || 
-      Array.isArray(analysisResult.feature_system) || 
+    const hasValidData =
+      isOverviewReady(analysisResult) ||
+      (Array.isArray(analysisResult.problem_analysis) && analysisResult.problem_analysis.length > 0) ||
+      (Array.isArray(analysisResult.feature_system) && analysisResult.feature_system.length > 0) ||
+      !!analysisResult.prd ||
+      !!analysisResult.system_design ||
+      !!analysisResult.execution_roadmap ||
+      !!analysisResult.manpower_planning ||
+      !!analysisResult.resource_requirements ||
+      !!analysisResult.cost_estimation ||
+      !!analysisResult.time_estimation ||
+      !!analysisResult.impact_analysis ||
       Array.isArray(analysisResult.development_tasks);
     
     if (!hasValidData) {
@@ -796,15 +1090,15 @@ ${content
       case 'executive-dashboard':
         return <ExecutiveDashboardSection data={analysisResult.executive_dashboard} />
       case 'problem-analysis':
-        return <ProblemAnalysisSection data={analysisResult.problem_analysis} />
+        return <ProblemAnalysisSection data={analysisResult.problem_analysis || []} />
       case 'feature-system':
-        return <FeatureSystemSection data={analysisResult.feature_system} />
+        return <FeatureSystemSection data={analysisResult.feature_system || []} />
       case 'gaps-opportunities':
         return <GapsOpportunitiesSection data={analysisResult.gaps_opportunities} />
       case 'system-design':
         return <SystemDesignSection data={analysisResult.system_design} />
       case 'development-tasks':
-        return <DevelopmentTasksSection data={analysisResult.development_tasks} />
+        return <DevelopmentTasksSection data={analysisResult.development_tasks || []} />
       case 'execution-roadmap':
         return <ExecutionRoadmapSection data={analysisResult.execution_roadmap} />
       case 'manpower-planning':
@@ -819,7 +1113,14 @@ ${content
         return <ImpactAnalysisSection data={analysisResult.impact_analysis} />
       case 'all':
       default:
-        return <AllSectionsView data={analysisResult} onSectionClick={setActiveSection} />
+        return (
+          <AllSectionsView
+            data={analysisResult}
+            onSectionClick={handleSectionChange}
+            hasSectionContent={hasSectionContent}
+            loadingSections={loadingSections}
+          />
+        )
     }
   }
 
@@ -883,7 +1184,7 @@ ${content
               section={section}
               isActive={activeSection === section.id}
               isCollapsed={sidebarCollapsed}
-              onClick={() => setActiveSection(section.id)}
+              onClick={() => handleSectionChange(section.id)}
             />
           ))}
 
@@ -899,7 +1200,7 @@ ${content
               section={section}
               isActive={activeSection === section.id}
               isCollapsed={sidebarCollapsed}
-              onClick={() => setActiveSection(section.id)}
+              onClick={() => handleSectionChange(section.id)}
             />
           ))}
 
@@ -915,7 +1216,7 @@ ${content
               section={section}
               isActive={activeSection === section.id}
               isCollapsed={sidebarCollapsed}
-              onClick={() => setActiveSection(section.id)}
+              onClick={() => handleSectionChange(section.id)}
             />
           ))}
 
@@ -931,7 +1232,7 @@ ${content
               section={section}
               isActive={activeSection === section.id}
               isCollapsed={sidebarCollapsed}
-              onClick={() => setActiveSection(section.id)}
+              onClick={() => handleSectionChange(section.id)}
             />
           ))}
         </nav>
@@ -968,7 +1269,7 @@ ${content
                 <span className="px-2 py-0.5 rounded-full text-xs font-medium
                   bg-emerald-100 dark:bg-emerald-900/30
                   text-emerald-600 dark:text-emerald-400">
-                  Complete
+                  {`${analysisResult.metadata?.generated_sections?.length || 1} Ready`}
                 </span>
               )}
             </div>
@@ -1446,137 +1747,366 @@ function EmptyState({ input, onGenerate }: { input: string; onGenerate: () => vo
 function PRDSection({ data, onCopy }: { data: any; onCopy: (content: string) => void }) {
   if (!data) return <EmptySection name="PRD" />
 
+  const list = (value: any): string[] =>
+    Array.isArray(value) ? value.filter((item) => typeof item === 'string' && item.trim()) : []
+
+  const productOverview = data.product_overview || {}
+  const objectivesGoals = data.objectives_goals || {}
+  const targetUsersPersonas = data.target_users_personas || {}
+  const scope = data.scope || {}
+  const featuresRequirements = data.features_requirements || {}
+  const nonFunctional = featuresRequirements.non_functional_requirements || {}
+  const wireframes = data.wireframes_mockups || {}
+  const risksAssumptions = data.risks_assumptions || {}
+  const releasePlan = data.release_plan || {}
+  const appendix = data.appendix || {}
+
+  const productName = productOverview.product_name || data.product_name || 'Not specified'
+  const oneLineSummary = productOverview.one_line_summary || data.mission || ''
+  const problemStatement =
+    productOverview.problem_statement || data.problem_statement || ''
+  const vision = productOverview.vision || data.vision || ''
+
+  const businessGoals = list(objectivesGoals.business_goals)
+  const userGoals = list(objectivesGoals.user_goals).length
+    ? list(objectivesGoals.user_goals)
+    : list(data.goals_short_term)
+  const kpis = Array.isArray(data.success_metrics)
+    ? data.success_metrics
+        .map((metric: any) =>
+          typeof metric === 'string'
+            ? metric
+            : [metric.metric, metric.target].filter(Boolean).join(': ')
+        )
+        .filter(Boolean)
+    : list(objectivesGoals.kpis)
+
+  const userSegments = list(targetUsersPersonas.user_segments).length
+    ? list(targetUsersPersonas.user_segments)
+    : list(data.target_users)
+  const personas = Array.isArray(targetUsersPersonas.personas)
+    ? targetUsersPersonas.personas
+    : Array.isArray(data.personas)
+      ? data.personas
+      : []
+  const painPoints = list(targetUsersPersonas.key_pain_points)
+
+  const problemStatementStructured =
+    data.problem_statement_structured ||
+    (problemStatement
+      ? `Users are facing ${problemStatement} because key workflows are fragmented, leading to slower outcomes and lower trust.`
+      : '')
+
+  const inScope = list(scope.in_scope)
+  const outOfScope = list(scope.out_of_scope).length
+    ? list(scope.out_of_scope)
+    : list(data.non_goals)
+
+  const functionalRequirements = list(featuresRequirements.functional_requirements).length
+    ? list(featuresRequirements.functional_requirements)
+    : list(data.feature_requirements)
+
+  const userStories = Array.isArray(data.user_stories) ? data.user_stories : []
+  const userFlowJourney = Array.isArray(data.user_flow_journey) ? data.user_flow_journey : []
+  const screens = Array.isArray(wireframes.screens) ? wireframes.screens : []
+  const acceptanceCriteria = Array.isArray(data.acceptance_criteria) ? data.acceptance_criteria : []
+
+  const risks = Array.isArray(risksAssumptions.risks)
+    ? risksAssumptions.risks
+    : Array.isArray(data.risks)
+      ? data.risks.map((risk: string) => ({ risk, impact: 'Medium', mitigation: 'Define mitigation in planning.' }))
+      : []
+  const assumptions = list(risksAssumptions.assumptions).length
+    ? list(risksAssumptions.assumptions)
+    : list(data.assumptions)
+
+  const dependencies = Array.isArray(data.dependencies) ? data.dependencies : []
+  const milestones = Array.isArray(data.timeline_milestones) ? data.timeline_milestones : []
+  const releasePhases = Array.isArray(releasePlan.phases) ? releasePlan.phases : []
+  const constraints = list(data.constraints)
+  const compliance = list(data.compliance_legal).length
+    ? list(data.compliance_legal)
+    : list(data.compliance)
+  const stakeholders = Array.isArray(data.stakeholders) ? data.stakeholders : []
+  const openQuestions = list(data.open_questions)
+
   return (
     <div className="space-y-8">
       <SectionHeader
         title="Product Requirements Document"
-        subtitle="Comprehensive product specification"
+        subtitle="Structured PM-grade PRD"
         onCopy={() => onCopy(JSON.stringify(data, null, 2))}
       />
 
-      {/* Vision & Mission */}
-      <ContentCard title="Vision">
-        <p className="text-gray-700 dark:text-gray-300 leading-relaxed">{data.vision}</p>
+      <ContentCard title="1. Product Overview (The Big Picture)">
+        <div className="space-y-3 text-gray-700 dark:text-gray-300">
+          <p><span className="font-semibold">Product Name:</span> {productName}</p>
+          <p><span className="font-semibold">One-line Summary:</span> {oneLineSummary || 'Not specified'}</p>
+          <p><span className="font-semibold">Problem Statement:</span> {problemStatement || 'Not specified'}</p>
+          <p><span className="font-semibold">Vision:</span> {vision || 'Not specified'}</p>
+        </div>
       </ContentCard>
 
-      <ContentCard title="Mission">
-        <p className="text-gray-700 dark:text-gray-300 leading-relaxed">{data.mission}</p>
-      </ContentCard>
-
-      <ContentCard title="Problem Statement">
-        <p className="text-gray-700 dark:text-gray-300 leading-relaxed">{data.problem_statement}</p>
-      </ContentCard>
-
-      {/* Target Users */}
-      {data.target_users && (
-        <ContentCard title="Target Users">
-          <ul className="space-y-2">
-            {data.target_users.map((user: string, i: number) => (
-              <li key={i} className="flex items-start gap-3">
-                <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30
-                  flex items-center justify-center text-xs font-bold text-blue-600">{i + 1}</span>
-                <span className="text-gray-700 dark:text-gray-300">{user}</span>
-              </li>
-            ))}
-          </ul>
-        </ContentCard>
-      )}
-
-      {/* Personas */}
-      {data.personas && data.personas.length > 0 && (
-        <ContentCard title="User Personas">
-          <div className="grid gap-6">
-            {data.personas.map((persona: any, i: number) => (
-              <div key={i} className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl">
-                <h4 className="font-semibold text-gray-900 dark:text-white mb-2">
-                  {persona.name}
-                </h4>
-                <p className="text-gray-600 dark:text-gray-400 text-sm mb-3">{persona.description}</p>
-                {persona.goals && (
-                  <div className="space-y-1">
-                    <p className="text-xs font-semibold text-gray-500 uppercase">Goals</p>
-                    <ul className="list-disc list-inside text-sm text-gray-600 dark:text-gray-400">
-                      {persona.goals.map((goal: string, j: number) => (
-                        <li key={j}>{goal}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </div>
-            ))}
+      <ContentCard title="2. Objectives & Goals">
+        <div className="space-y-4">
+          <div>
+            <p className="text-sm font-semibold text-gray-500 uppercase mb-2">Business Goals</p>
+            <ul className="space-y-2">{businessGoals.map((goal: string, i: number) => <li key={i} className="text-gray-700 dark:text-gray-300">- {goal}</li>)}</ul>
           </div>
-        </ContentCard>
-      )}
+          <div>
+            <p className="text-sm font-semibold text-gray-500 uppercase mb-2">User Goals</p>
+            <ul className="space-y-2">{userGoals.map((goal: string, i: number) => <li key={i} className="text-gray-700 dark:text-gray-300">- {goal}</li>)}</ul>
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-gray-500 uppercase mb-2">KPIs / Success Metrics</p>
+            <ul className="space-y-2">{kpis.map((metric: string, i: number) => <li key={i} className="text-gray-700 dark:text-gray-300">- {metric}</li>)}</ul>
+          </div>
+        </div>
+      </ContentCard>
 
-      {/* Goals */}
-      {data.goals_short_term && (
-        <ContentCard title="Short-term Goals (3-6 months)">
-          <ul className="space-y-2">
-            {data.goals_short_term.map((goal: string, i: number) => (
-              <li key={i} className="flex items-start gap-3">
-                <Check className="w-5 h-5 text-emerald-500 mt-0.5" />
-                <span className="text-gray-700 dark:text-gray-300">{goal}</span>
-              </li>
-            ))}
-          </ul>
-        </ContentCard>
-      )}
+      <ContentCard title="3. Target Users & Personas">
+        <div className="space-y-4">
+          <div>
+            <p className="text-sm font-semibold text-gray-500 uppercase mb-2">User Segments</p>
+            <ul className="space-y-2">{userSegments.map((segment: string, i: number) => <li key={i} className="text-gray-700 dark:text-gray-300">- {segment}</li>)}</ul>
+          </div>
+          {personas.length > 0 && (
+            <div className="space-y-3">
+              <p className="text-sm font-semibold text-gray-500 uppercase">Personas</p>
+              {personas.map((persona: any, i: number) => (
+                <div key={i} className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl">
+                  <p className="font-semibold text-gray-900 dark:text-white">{persona.name || `Persona ${i + 1}`}</p>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{persona.description || 'No description'}</p>
+                  {Array.isArray(persona.pain_points) && persona.pain_points.length > 0 && (
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
+                      <span className="font-medium">Pain points:</span> {persona.pain_points.join(', ')}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          {painPoints.length > 0 && (
+            <div>
+              <p className="text-sm font-semibold text-gray-500 uppercase mb-2">Pain Points</p>
+              <ul className="space-y-2">{painPoints.map((point: string, i: number) => <li key={i} className="text-gray-700 dark:text-gray-300">- {point}</li>)}</ul>
+            </div>
+          )}
+        </div>
+      </ContentCard>
 
-      {data.goals_long_term && (
-        <ContentCard title="Long-term Goals (1-3 years)">
-          <ul className="space-y-2">
-            {data.goals_long_term.map((goal: string, i: number) => (
-              <li key={i} className="flex items-start gap-3">
-                <Target className="w-5 h-5 text-blue-500 mt-0.5" />
-                <span className="text-gray-700 dark:text-gray-300">{goal}</span>
-              </li>
-            ))}
-          </ul>
-        </ContentCard>
-      )}
+      <ContentCard title="4. Problem Statement">
+        <p className="text-gray-700 dark:text-gray-300 leading-relaxed">
+          {problemStatementStructured || 'Users are facing [problem] because [reason], leading to [impact].'}
+        </p>
+      </ContentCard>
 
-      {/* Feature Requirements */}
-      {data.feature_requirements && (
-        <ContentCard title="Feature Requirements">
-          <ul className="space-y-2">
-            {data.feature_requirements.map((req: string, i: number) => (
-              <li key={i} className="flex items-start gap-3">
-                <span className="w-6 h-6 rounded bg-purple-100 dark:bg-purple-900/30
-                  flex items-center justify-center text-xs font-bold text-purple-600">F{i + 1}</span>
-                <span className="text-gray-700 dark:text-gray-300">{req}</span>
-              </li>
-            ))}
-          </ul>
-        </ContentCard>
-      )}
+      <ContentCard title="5. Scope">
+        <div className="grid md:grid-cols-2 gap-4">
+          <div>
+            <p className="text-sm font-semibold text-gray-500 uppercase mb-2">In Scope</p>
+            <ul className="space-y-2">{inScope.map((item: string, i: number) => <li key={i} className="text-gray-700 dark:text-gray-300">- {item}</li>)}</ul>
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-gray-500 uppercase mb-2">Out of Scope</p>
+            <ul className="space-y-2">{outOfScope.map((item: string, i: number) => <li key={i} className="text-gray-700 dark:text-gray-300">- {item}</li>)}</ul>
+          </div>
+        </div>
+      </ContentCard>
 
-      {/* Success Metrics */}
-      {data.success_metrics && (
-        <ContentCard title="Success Metrics">
-          <ul className="space-y-2">
-            {data.success_metrics.map((metric: string, i: number) => (
-              <li key={i} className="flex items-start gap-3">
-                <TrendingUp className="w-5 h-5 text-emerald-500 mt-0.5" />
-                <span className="text-gray-700 dark:text-gray-300">{metric}</span>
-              </li>
-            ))}
-          </ul>
-        </ContentCard>
-      )}
+      <ContentCard title="6. Features & Requirements">
+        <div className="space-y-4">
+          <div>
+            <p className="text-sm font-semibold text-gray-500 uppercase mb-2">Functional Requirements</p>
+            <ul className="space-y-2">
+              {functionalRequirements.map((req: string, i: number) => (
+                <li key={i} className="text-gray-700 dark:text-gray-300">- The system shall allow users to {req.replace(/^The system shall allow users to\s*/i, '')}</li>
+              ))}
+            </ul>
+          </div>
+          <div className="grid md:grid-cols-2 gap-4">
+            <div>
+              <p className="text-sm font-semibold text-gray-500 uppercase mb-2">Performance</p>
+              <ul className="space-y-1">{list(nonFunctional.performance).map((item: string, i: number) => <li key={i} className="text-sm text-gray-700 dark:text-gray-300">- {item}</li>)}</ul>
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-gray-500 uppercase mb-2">Security</p>
+              <ul className="space-y-1">{list(nonFunctional.security).map((item: string, i: number) => <li key={i} className="text-sm text-gray-700 dark:text-gray-300">- {item}</li>)}</ul>
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-gray-500 uppercase mb-2">Scalability</p>
+              <ul className="space-y-1">{list(nonFunctional.scalability).map((item: string, i: number) => <li key={i} className="text-sm text-gray-700 dark:text-gray-300">- {item}</li>)}</ul>
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-gray-500 uppercase mb-2">Reliability</p>
+              <ul className="space-y-1">{list(nonFunctional.reliability).map((item: string, i: number) => <li key={i} className="text-sm text-gray-700 dark:text-gray-300">- {item}</li>)}</ul>
+            </div>
+          </div>
+        </div>
+      </ContentCard>
 
-      {/* Risks */}
-      {data.risks && (
-        <ContentCard title="Risks & Mitigations">
-          <ul className="space-y-2">
-            {data.risks.map((risk: string, i: number) => (
-              <li key={i} className="flex items-start gap-3">
-                <AlertTriangle className="w-5 h-5 text-amber-500 mt-0.5" />
-                <span className="text-gray-700 dark:text-gray-300">{risk}</span>
-              </li>
-            ))}
-          </ul>
-        </ContentCard>
-      )}
+      <ContentCard title="7. User Stories">
+        <ul className="space-y-3">
+          {userStories.map((story: any, i: number) => (
+            <li key={i} className="text-gray-700 dark:text-gray-300">
+              - {story.story || story.full_statement || `As a ${story.persona || 'user'}, I want ${story.action || 'a capability'}, so that ${story.benefit || 'I get value'}`}
+            </li>
+          ))}
+        </ul>
+      </ContentCard>
+
+      <ContentCard title="8. User Flow / Journey">
+        <div className="space-y-3">
+          {userFlowJourney.map((flow: any, i: number) => (
+            <p key={i} className="text-gray-700 dark:text-gray-300">
+              - {flow.entry_point || 'Entry'} {' -> '} {Array.isArray(flow.actions) ? flow.actions.join(' -> ') : 'Actions'} {' -> '} {flow.outcome || 'Outcome'}
+            </p>
+          ))}
+        </div>
+      </ContentCard>
+
+      <ContentCard title="9. Wireframes / Mockups">
+        <div className="space-y-4">
+          {screens.length > 0 && (
+            <div>
+              <p className="text-sm font-semibold text-gray-500 uppercase mb-2">Screens</p>
+              {screens.map((screen: any, i: number) => (
+                <div key={i} className="mb-2 text-gray-700 dark:text-gray-300">
+                  - {screen.name}: {screen.purpose}. Key elements: {(screen.key_elements || []).join(', ')}
+                </div>
+              ))}
+            </div>
+          )}
+          <div>
+            <p className="text-sm font-semibold text-gray-500 uppercase mb-2">Navigation</p>
+            <ul className="space-y-1">{list(wireframes.navigation).map((item: string, i: number) => <li key={i} className="text-gray-700 dark:text-gray-300">- {item}</li>)}</ul>
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-gray-500 uppercase mb-2">Layout Ideas</p>
+            <ul className="space-y-1">{list(wireframes.layout_ideas).map((item: string, i: number) => <li key={i} className="text-gray-700 dark:text-gray-300">- {item}</li>)}</ul>
+          </div>
+        </div>
+      </ContentCard>
+
+      <ContentCard title="10. Acceptance Criteria">
+        <div className="space-y-3">
+          {acceptanceCriteria.map((criterion: any, i: number) => (
+            <div key={i} className="p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+              <p className="text-sm font-semibold text-gray-900 dark:text-white mb-1">
+                {criterion.id || `AC-${i + 1}`}
+              </p>
+              <p className="text-sm text-gray-700 dark:text-gray-300">
+                Given {criterion.given || 'a user context'}, When {criterion.when || 'an action happens'}, Then {criterion.then || criterion.description || 'the outcome should be achieved'}.
+              </p>
+            </div>
+          ))}
+        </div>
+      </ContentCard>
+
+      <ContentCard title="11. Success Metrics (KPIs)">
+        <ul className="space-y-2">
+          {(Array.isArray(data.success_metrics) ? data.success_metrics : []).map((metric: any, i: number) => (
+            <li key={i} className="text-gray-700 dark:text-gray-300">
+              - {typeof metric === 'string' ? metric : `${metric.metric}: ${metric.target} (${metric.measurement_window})`}
+            </li>
+          ))}
+        </ul>
+      </ContentCard>
+
+      <ContentCard title="12. Risks & Assumptions">
+        <div className="grid md:grid-cols-2 gap-4">
+          <div>
+            <p className="text-sm font-semibold text-gray-500 uppercase mb-2">Risks</p>
+            <ul className="space-y-2">
+              {risks.map((risk: any, i: number) => (
+                <li key={i} className="text-gray-700 dark:text-gray-300">
+                  - {risk.risk || risk} (Impact: {risk.impact || 'Medium'}) | Mitigation: {risk.mitigation || 'TBD'}
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-gray-500 uppercase mb-2">Assumptions</p>
+            <ul className="space-y-2">{assumptions.map((item: string, i: number) => <li key={i} className="text-gray-700 dark:text-gray-300">- {item}</li>)}</ul>
+          </div>
+        </div>
+      </ContentCard>
+
+      <ContentCard title="13. Dependencies">
+        <ul className="space-y-2">
+          {dependencies.map((dependency: any, i: number) => (
+            <li key={i} className="text-gray-700 dark:text-gray-300">
+              - {typeof dependency === 'string' ? dependency : `${dependency.dependency} (${dependency.type}) | Owner: ${dependency.owner} | ${dependency.notes}`}
+            </li>
+          ))}
+        </ul>
+      </ContentCard>
+
+      <ContentCard title="14. Timeline & Milestones">
+        <ul className="space-y-2">
+          {milestones.map((milestone: any, i: number) => (
+            <li key={i} className="text-gray-700 dark:text-gray-300">
+              - {milestone.target_date}: {milestone.milestone} - {milestone.description}
+            </li>
+          ))}
+        </ul>
+      </ContentCard>
+
+      <ContentCard title="15. Release Plan">
+        <div className="space-y-3">
+          {releasePhases.map((phase: any, i: number) => (
+            <div key={i} className="text-gray-700 dark:text-gray-300">
+              <p className="font-semibold">{phase.name}</p>
+              <p className="text-sm">Scope: {(phase.scope || []).join(', ')}</p>
+              <p className="text-sm">Exit Criteria: {(phase.exit_criteria || []).join(', ')}</p>
+            </div>
+          ))}
+          {releasePlan.rollout_strategy && (
+            <p className="text-gray-700 dark:text-gray-300">
+              <span className="font-semibold">Rollout Strategy:</span> {releasePlan.rollout_strategy}
+            </p>
+          )}
+        </div>
+      </ContentCard>
+
+      <ContentCard title="16. Constraints">
+        <ul className="space-y-2">{constraints.map((item: string, i: number) => <li key={i} className="text-gray-700 dark:text-gray-300">- {item}</li>)}</ul>
+      </ContentCard>
+
+      <ContentCard title="17. Compliance & Legal">
+        <ul className="space-y-2">{compliance.map((item: string, i: number) => <li key={i} className="text-gray-700 dark:text-gray-300">- {item}</li>)}</ul>
+      </ContentCard>
+
+      <ContentCard title="18. Stakeholders">
+        <ul className="space-y-2">
+          {stakeholders.map((stakeholder: any, i: number) => (
+            <li key={i} className="text-gray-700 dark:text-gray-300">
+              - {(stakeholder.name_or_role || stakeholder.name || 'Stakeholder')} | Interest: {stakeholder.interest || 'N/A'} | Responsibility: {stakeholder.responsibility || 'N/A'}
+            </li>
+          ))}
+        </ul>
+      </ContentCard>
+
+      <ContentCard title="19. Open Questions">
+        <ul className="space-y-2">{openQuestions.map((item: string, i: number) => <li key={i} className="text-gray-700 dark:text-gray-300">- {item}</li>)}</ul>
+      </ContentCard>
+
+      <ContentCard title="20. Appendix">
+        <div className="space-y-4">
+          <div>
+            <p className="text-sm font-semibold text-gray-500 uppercase mb-2">Research Assumptions</p>
+            <ul className="space-y-1">{list(appendix.research_assumptions).map((item: string, i: number) => <li key={i} className="text-gray-700 dark:text-gray-300">- {item}</li>)}</ul>
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-gray-500 uppercase mb-2">Competitor Notes</p>
+            <ul className="space-y-1">{list(appendix.competitor_notes).map((item: string, i: number) => <li key={i} className="text-gray-700 dark:text-gray-300">- {item}</li>)}</ul>
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-gray-500 uppercase mb-2">References</p>
+            <ul className="space-y-1">{list(appendix.references).map((item: string, i: number) => <li key={i} className="text-gray-700 dark:text-gray-300">- {item}</li>)}</ul>
+          </div>
+        </div>
+      </ContentCard>
     </div>
   )
 }
@@ -2174,48 +2704,95 @@ function ImpactAnalysisSection({ data }: { data: any }) {
 }
 
 // All Sections Overview
-function AllSectionsView({ data, onSectionClick }: { data: ComprehensiveStrategyResult; onSectionClick: (id: SectionId) => void }) {
+function AllSectionsView({
+  data,
+  onSectionClick,
+  hasSectionContent,
+  loadingSections,
+}: {
+  data: AnalysisResultState
+  onSectionClick: (id: SectionId) => void
+  hasSectionContent: (id: SectionId, result?: AnalysisResultState | null) => boolean
+  loadingSections: Partial<Record<SectionId, boolean>>
+}) {
+  const sectionSummary = (sectionId: SectionId, readyText: string, pendingText: string) =>
+    loadingSections[sectionId]
+      ? 'Generating with Gemini...'
+      : data.metadata?.stale_sections?.includes(sectionId)
+        ? `Stale after input update. ${pendingText}`
+        : hasSectionContent(sectionId, data)
+        ? readyText
+        : pendingText
+
   const sectionSummaries = [
     {
       id: 'prd' as SectionId,
       title: 'PRD Document',
       icon: FileText,
-      summary: data.prd?.vision?.slice(0, 100) + '...' || 'Product requirements document',
+      summary: sectionSummary(
+        'prd',
+        data.prd?.product_overview?.vision
+          ? `${data.prd.product_overview.vision.slice(0, 100)}...`
+          : data.prd?.vision
+            ? `${data.prd.vision.slice(0, 100)}...`
+            : 'Product requirements document ready',
+        'Click to generate the PRD'
+      ),
       color: 'blue',
     },
     {
       id: 'problem-analysis' as SectionId,
       title: 'Problems',
       icon: AlertTriangle,
-      summary: `${data.problem_analysis?.length || 0} problems identified`,
+      summary: sectionSummary(
+        'problem-analysis',
+        `${data.problem_analysis?.length || 0} problems identified`,
+        'Click to generate problem analysis'
+      ),
       color: 'red',
     },
     {
       id: 'feature-system' as SectionId,
       title: 'Features',
       icon: Layers,
-      summary: `${data.feature_system?.length || 0} features suggested`,
+      summary: sectionSummary(
+        'feature-system',
+        `${data.feature_system?.length || 0} features suggested`,
+        'Click to generate 10+ tailored features'
+      ),
       color: 'purple',
     },
     {
       id: 'development-tasks' as SectionId,
       title: 'Tasks',
       icon: CheckSquare,
-      summary: `${data.development_tasks?.length || 0} development tasks`,
+      summary: sectionSummary(
+        'development-tasks',
+        `${data.development_tasks?.length || 0} development tasks`,
+        'Click to generate implementation tasks'
+      ),
       color: 'emerald',
     },
     {
       id: 'cost-estimation' as SectionId,
       title: 'Cost Estimation',
       icon: IndianRupee,
-      summary: `₹${((data.cost_estimation?.total_first_year || 0) / 100000).toFixed(1)}L first year`,
+      summary: sectionSummary(
+        'cost-estimation',
+        `₹${(((data.cost_estimation as any)?.total_first_year || (data.cost_estimation as any)?.total_first_year_cost_inr || 0) / 100000).toFixed(1)}L first year`,
+        'Click to generate cost estimation'
+      ),
       color: 'amber',
     },
     {
       id: 'timeline' as SectionId,
       title: 'Timeline',
       icon: Calendar,
-      summary: `${data.time_estimation?.total_weeks || 12} weeks to MVP`,
+      summary: sectionSummary(
+        'timeline',
+        `${data.time_estimation?.total_weeks || data.time_estimation?.mvp_timeline?.total_weeks || 12} weeks to MVP`,
+        'Click to generate delivery timeline'
+      ),
       color: 'cyan',
     },
   ]
@@ -2332,7 +2909,7 @@ function EmptySection({ name }: { name: string }) {
         No {name} Data
       </h3>
       <p className="text-gray-500 dark:text-gray-400">
-        This section will be populated after analysis.
+        Open this section to trigger on-demand generation.
       </p>
     </div>
   )

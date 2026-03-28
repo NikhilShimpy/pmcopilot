@@ -21,7 +21,8 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ projectCount }: SidebarProps) {
-  const [collapsed, setCollapsed] = useState(true) // Start collapsed  const pathname = usePathname()
+  const [collapsed, setCollapsed] = useState(true) // Start collapsed
+  const pathname = usePathname()
 
   const navItems = [
     {

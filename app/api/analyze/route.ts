@@ -8,6 +8,7 @@
  */
 
 import { NextRequest } from 'next/server';
+import { createHash } from 'crypto';
 import { createServerSupabaseClient, getUserOrAnonymous } from '@/lib/supabase/server';
 import { logger } from '@/lib/logger';
 import {
@@ -17,7 +18,8 @@ import {
   throwValidationError,
 } from '@/lib/errorHandler';
 import { analysisEngineService } from '@/services/analysis-engine.service';
-import { runComprehensiveStrategyAnalysis } from '@/lib/comprehensiveStrategyEngine';
+import { generateOverviewAnalysis } from '@/lib/sectionedStrategyEngine';
+import { assertGeminiFreeTierConfig, config } from '@/lib/config';
 import { PipelineContext } from '@/types/analysis';
 import { SUCCESS_MESSAGES, DB_TABLES, VALIDATION } from '@/utils/constants';
 import { isValidUUID } from '@/utils/helpers';
@@ -45,7 +47,7 @@ const DEPTH_CONFIG: Record<OutputDepth, {
     aimTasks: 15,
     descriptionLength: 'concise (50-100 words per section)',
     timeout: 45000,
-    maxTokens: 4096,
+    maxTokens: 1000,
   },
   medium: {
     minProblems: 8,
@@ -56,7 +58,7 @@ const DEPTH_CONFIG: Record<OutputDepth, {
     aimTasks: 25,
     descriptionLength: 'balanced (100-200 words per section)',
     timeout: 60000,
-    maxTokens: 6144,
+    maxTokens: 1400,
   },
   long: {
     minProblems: 12,
@@ -67,7 +69,7 @@ const DEPTH_CONFIG: Record<OutputDepth, {
     aimTasks: 40,
     descriptionLength: 'comprehensive (200-400 words per section)',
     timeout: 90000,
-    maxTokens: 32768, // Raised to support full problem+feature+task generation
+    maxTokens: 1800,
   },
   'extra-long': {
     minProblems: 15,
@@ -78,7 +80,7 @@ const DEPTH_CONFIG: Record<OutputDepth, {
     aimTasks: 60,
     descriptionLength: 'MAXIMUM detail (400-800+ words per section, include examples, edge cases, and deep analysis)',
     timeout: 120000,
-    maxTokens: 32768, // Raised to support exhaustive output
+    maxTokens: 2200,
   },
 };
 
@@ -87,6 +89,7 @@ interface EnhancedAnalyzeRequest {
   feedback: string;
   project_id?: string;
   detail_level?: OutputDepth;
+  reuse_cached?: boolean;
   context?: {
     project_name?: string;
     project_context?: string;
@@ -94,6 +97,18 @@ interface EnhancedAnalyzeRequest {
     industry?: string;
     product_type?: string;
   };
+}
+
+function normalizeInput(input: string): string {
+  return input.replace(/\s+/g, ' ').trim();
+}
+
+function getInputHash(input: string): string {
+  return createHash('sha256').update(normalizeInput(input)).digest('hex');
+}
+
+function getMetadataInputHash(result: any): string | undefined {
+  return result?.metadata?.input_hash;
 }
 
 /**
@@ -145,13 +160,20 @@ export async function POST(request: NextRequest) {
       throwValidationError('Invalid project_id format');
     }
 
+    assertGeminiFreeTierConfig();
+    const normalizedFeedback = normalizeInput(body.feedback);
+    if (normalizedFeedback.length < VALIDATION.ANALYSIS_INPUT.MIN_LENGTH) {
+      throwValidationError('Feedback must contain meaningful text after trimming whitespace');
+    }
+    const inputHash = getInputHash(normalizedFeedback);
+
     // Get server client and user
     const supabase = await createServerSupabaseClient();
     const user = await getUserOrAnonymous();
     const isAuthenticated = user.id !== 'anonymous';
 
     // Determine depth level
-    const depthLevel: OutputDepth = body.detail_level || 'long';
+    const depthLevel: OutputDepth = body.detail_level || 'medium';
     const depthConfig = DEPTH_CONFIG[depthLevel];
 
     // Build pipeline context with depth settings
@@ -185,41 +207,102 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    logger.info('Starting comprehensive analysis', {
-      feedbackLength: body.feedback.length,
+    logger.info('Starting Gemini overview analysis', {
+      feedbackLength: normalizedFeedback.length,
       hasContext: !!body.context,
       hasProjectId: !!body.project_id,
       isAuthenticated,
       depthLevel,
       maxTokens: depthConfig.maxTokens,
+      model: config.gemini.model,
       expectedProblems: `${depthConfig.minProblems}-${depthConfig.aimProblems}`,
       expectedFeatures: `${depthConfig.minFeatures}-${depthConfig.aimFeatures}`,
       expectedTasks: `${depthConfig.minTasks}-${depthConfig.aimTasks}`,
     });
 
-    // Run comprehensive analysis with depth-aware prompt and token config
-    const comprehensiveResult = await runComprehensiveStrategyAnalysis(
-      body.feedback,
-      {
-        ...pipelineContext,
-        maxTokens: depthConfig.maxTokens,
-        timeout: depthConfig.timeout,
-      }
-    );
+    const canReuseCached = body.reuse_cached !== false && isAuthenticated && !!body.project_id;
+    if (canReuseCached) {
+      const { data: candidates } = await supabase
+        .from(DB_TABLES.ANALYSES)
+        .select('id, result, created_at')
+        .eq('project_id', body.project_id as string)
+        .order('created_at', { ascending: false })
+        .limit(5);
 
-    if (!comprehensiveResult.success || !comprehensiveResult.result) {
-      logger.error('Analysis failed', {
-        requestId,
-        error: comprehensiveResult.error,
-        provider: comprehensiveResult.provider,
+      const cached = (candidates || []).find((candidate: any) => {
+        const candidateResult = candidate?.result || {};
+        const metadata = candidateResult?.metadata || {};
+        const candidateHash = getMetadataInputHash(candidateResult);
+        const hasOverview = Boolean(
+          candidateResult?.executive_dashboard ||
+            (Array.isArray(candidateResult?.problem_analysis) &&
+              candidateResult.problem_analysis.length > 0) ||
+            (Array.isArray(candidateResult?.feature_system) &&
+              candidateResult.feature_system.length > 0)
+        );
+        const sameDepth = (metadata.detail_level || 'medium') === depthLevel;
+
+        if (!hasOverview || !sameDepth) {
+          return false;
+        }
+
+        if (candidateHash && candidateHash === inputHash) {
+          return true;
+        }
+
+        const candidateInput = metadata.source_input || '';
+        return candidateInput ? normalizeInput(candidateInput) === normalizedFeedback : false;
       });
 
-      // Return proper error response - NOT using successResponse for errors
+      if (cached) {
+        const cachedResult = cached.result || {};
+        const processingTime = Date.now() - startTime;
+
+        logger.info('Reusing cached overview analysis', {
+          requestId,
+          cachedAnalysisId: cached.id,
+          depthLevel,
+        });
+
+        return successResponse(
+          {
+            ...cachedResult,
+            saved_id: cached.id,
+            provider: cachedResult?.metadata?.provider || 'gemini',
+            api_processing_time_ms: processingTime,
+            depth_level: depthLevel,
+            generation_mode: 'cached-overview',
+            metadata: {
+              ...cachedResult.metadata,
+              input_hash: cachedResult.metadata?.input_hash || inputHash,
+              saved_analysis_id: cached.id,
+            },
+          },
+          SUCCESS_MESSAGES.ANALYSIS_COMPLETED,
+          200
+        );
+      }
+    }
+
+    let overviewResult: Awaited<ReturnType<typeof generateOverviewAnalysis>>;
+    try {
+      overviewResult = await generateOverviewAnalysis(normalizedFeedback, {
+        ...pipelineContext,
+        timeout: Math.min(depthConfig.timeout, 60000),
+        inputHash,
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Overview generation failed';
+      logger.error('Overview analysis failed', {
+        requestId,
+        error: errorMessage,
+      });
+
       return new Response(
         JSON.stringify({
           success: false,
-          error: comprehensiveResult.error || 'Analysis failed',
-          provider: comprehensiveResult.provider || 'none',
+          error: errorMessage,
+          provider: 'gemini',
         }),
         {
           status: 500,
@@ -234,7 +317,7 @@ export async function POST(request: NextRequest) {
       const saveResult = await analysisEngineService.saveAnalysis(
         supabase,
         body.project_id,
-        comprehensiveResult.result
+        overviewResult.result
       );
 
       if (saveResult) {
@@ -247,23 +330,30 @@ export async function POST(request: NextRequest) {
 
     logger.apiResponse('POST', '/api/analyze', 200, {
       requestId,
-      analysisId: comprehensiveResult.result.metadata?.analysis_id,
+      analysisId: overviewResult.result.metadata?.analysis_id,
       savedId: savedAnalysisId,
-      problemsFound: comprehensiveResult.result.problem_analysis?.length || 0,
-      featuresGenerated: comprehensiveResult.result.feature_system?.length || 0,
-      tasksCreated: comprehensiveResult.result.development_tasks?.length || 0,
-      provider: comprehensiveResult.provider,
+      problemsFound: overviewResult.result.problem_analysis?.length || 0,
+      featuresGenerated: overviewResult.result.feature_system?.length || 0,
+      tasksCreated: 0,
+      provider: overviewResult.provider,
       processingTime,
       depthLevel,
     });
 
     // Build response
     const response = {
-      ...comprehensiveResult.result,
+      ...overviewResult.result,
       saved_id: savedAnalysisId,
-      provider: comprehensiveResult.provider,
+      provider: overviewResult.provider,
       api_processing_time_ms: processingTime,
       depth_level: depthLevel,
+      generation_mode: 'section-on-demand-overview',
+      metadata: {
+        ...overviewResult.result.metadata,
+        input_hash: overviewResult.result.metadata?.input_hash || inputHash,
+        model_used: overviewResult.result.metadata?.model_used || config.gemini.model,
+        saved_analysis_id: savedAnalysisId || undefined,
+      },
     };
 
     return successResponse(response, SUCCESS_MESSAGES.ANALYSIS_COMPLETED, 200);

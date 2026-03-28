@@ -135,7 +135,7 @@ export function ComponentSidebar({
     return analysisResult.development_tasks.filter(
       (t) =>
         t.title.toLowerCase().includes(query) ||
-        t.expected_output.toLowerCase().includes(query)
+        (t.expected_output || '').toLowerCase().includes(query)
     )
   }, [analysisResult?.development_tasks, searchQuery])
 

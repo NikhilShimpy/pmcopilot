@@ -47,32 +47,28 @@ export const HTTP_STATUS = {
 // ============================================
 
 /**
- * AI PROVIDER HIERARCHY:
- * 1. PRIMARY: Google Gemini API
- * 2. FALLBACK: Groq
- * 3. FALLBACK 2: Claude (Anthropic) - if available
- *
- * REMOVED: Ollama, HuggingFace, OpenRouter, Puter
+ * AI CONFIGURATION
+ * Runtime generation is enforced as Gemini free-tier only.
  */
 export const AI_CONFIG = {
-  // PRIMARY: Google Gemini API
+  // FREE-TIER GEMINI ONLY
   GEMINI: {
     BASE_URL: 'https://generativelanguage.googleapis.com/v1beta/models',
-    DEFAULT_MODEL: 'gemini-2.5-flash', // Stable Gemini 2.5 Flash (2026 production model)
-    PRO_MODEL: 'gemini-2.5-pro', // For complex tasks
-    TIMEOUT: 90000, // 90 seconds (increased for reliability)
+    DEFAULT_MODEL: process.env.GEMINI_MODEL?.trim() || 'gemini-2.5-flash-lite',
+    TIMEOUT: 90000,
   },
 
-  // FALLBACK: Groq (only if Gemini fails)
+  // Legacy provider settings retained for compatibility only.
+  // No runtime fallback path should route to paid providers.
   GROQ: {
     BASE_URL: 'https://api.groq.com/openai/v1',
     CHAT_ENDPOINT: '/chat/completions',
-    DEFAULT_MODEL: 'llama-3.3-70b-versatile', // Updated to latest stable model
+    DEFAULT_MODEL: 'llama-3.3-70b-versatile',
     FAST_MODEL: 'llama-3.1-8b-instant',
     TIMEOUT: 90000,
   },
 
-  // FALLBACK 2: Claude (Anthropic) - optional third provider
+  // Legacy provider settings retained for compatibility only.
   CLAUDE: {
     BASE_URL: 'https://api.anthropic.com/v1',
     MESSAGES_ENDPOINT: '/messages',
@@ -82,7 +78,7 @@ export const AI_CONFIG = {
 
   MAX_RETRIES: 2,
   DEFAULT_TEMPERATURE: 0.7,
-  DEFAULT_MAX_TOKENS: 32768, // Raised from 8192 to support comprehensive output
+  DEFAULT_MAX_TOKENS: 4096,
 
   // Pipeline-specific configuration
   PIPELINE: {

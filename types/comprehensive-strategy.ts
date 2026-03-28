@@ -1,69 +1,75 @@
 /**
  * PMCopilot - Comprehensive Product Strategy Types
- * Complete Product Thinking Engine Output Schema
- *
- * This represents the 13-section output that combines:
- * - YC-level pitch
- * - McKinsey-quality analysis
- * - CTO execution document
+ * Backwards-compatible schema for both legacy full-generation output
+ * and the newer Gemini section-by-section flow.
  */
 
-// ============================================
-// SECTION 1: EXECUTIVE DASHBOARD
-// ============================================
+export type StrategySectionId =
+  | 'overview'
+  | 'executive-dashboard'
+  | 'problem-analysis'
+  | 'feature-system'
+  | 'gaps-opportunities'
+  | 'prd'
+  | 'system-design'
+  | 'development-tasks'
+  | 'execution-roadmap'
+  | 'manpower-planning'
+  | 'resources'
+  | 'cost-estimation'
+  | 'timeline'
+  | 'impact-analysis';
 
 export interface ExecutiveDashboard {
   idea_expansion: string;
   key_insight: string;
-  innovation_score: number; // 0-10
+  innovation_score: number;
   market_opportunity: string;
   complexity_level: 'Low' | 'Medium' | 'High' | 'Very High';
   recommended_strategy: string;
 }
 
-// ============================================
-// SECTION 2: PROBLEM ANALYSIS (5-10 problems)
-// ============================================
-
 export interface StrategicProblem {
   id: string;
   title: string;
   deep_description: string;
-  root_cause: string;
-  affected_users: string;
-  current_solutions: string;
-  gaps_in_market: string;
-  why_existing_fails: string;
-  severity_score: number; // 0-10
-  frequency_score: number; // 0-10
-  business_impact: string;
-  technical_difficulty: 'Low' | 'Medium' | 'High';
-  evidence_examples: string[];
+  description?: string;
+  root_cause?: string;
+  affected_users?: string;
+  current_solutions?: string;
+  gaps_in_market?: string;
+  why_existing_fails?: string;
+  severity_score: number;
+  frequency_score: number;
+  business_impact?: string;
+  technical_difficulty?: 'Low' | 'Medium' | 'High';
+  evidence_examples?: string[];
+  severity?: string;
+  category?: string;
+  consequence_of_inaction?: string;
 }
-
-// ============================================
-// SECTION 3: FEATURE SYSTEM (15-30 features)
-// ============================================
 
 export interface StrategicFeature {
   id: string;
   name: string;
-  category: 'core' | 'advanced' | 'futuristic';
+  title?: string;
+  category: 'core' | 'advanced' | 'futuristic' | string;
   detailed_description: string;
-  why_needed: string;
-  linked_problems: string[];
-  user_value: string;
-  business_value: string;
-  implementation_strategy: string[];
-  technical_requirements: string[];
-  dependencies: string[];
-  complexity: 'Low' | 'Medium' | 'High';
-  estimated_dev_time: string;
+  description?: string;
+  why_needed?: string;
+  linked_problems?: string[];
+  user_value?: string;
+  business_value?: string;
+  implementation_strategy?: string[];
+  technical_requirements?: string[];
+  dependencies?: string[];
+  complexity: 'Low' | 'Medium' | 'High' | 'Simple' | 'Complex' | string;
+  estimated_dev_time?: string;
+  estimated_hours?: number;
+  priority?: 'High' | 'Medium' | 'Low';
+  user_story?: string;
+  acceptance_criteria?: string[];
 }
-
-// ============================================
-// SECTION 4: GAPS & OPPORTUNITIES
-// ============================================
 
 export interface GapsOpportunities {
   market_lacks: string[];
@@ -72,25 +78,21 @@ export interface GapsOpportunities {
   unfair_advantages: string[];
 }
 
-// ============================================
-// SECTION 5: COMPREHENSIVE PRD
-// ============================================
-
 export interface UserPersona {
   name: string;
   description: string;
-  goals: string[];
-  pain_points: string[];
-  user_journey: string;
+  goals?: string[];
+  pain_points?: string[];
+  user_journey?: string;
 }
 
 export interface UserStory {
-  id: string;
+  id?: string;
   persona: string;
   action: string;
   benefit: string;
-  full_statement: string;
-  acceptance_criteria: string[];
+  full_statement?: string;
+  acceptance_criteria?: string[];
 }
 
 export interface AcceptanceCriterion {
@@ -111,19 +113,89 @@ export interface RiskItem {
 }
 
 export interface ComprehensivePRD {
-  vision: string;
-  mission: string;
-  problem_statement: string;
-  target_users: string[];
-  personas: UserPersona[];
-  user_journey: string;
-  goals_short_term: string[];
-  goals_long_term: string[];
-  non_goals: string[];
-  feature_requirements: string[];
+  product_overview?: {
+    product_name?: string;
+    one_line_summary?: string;
+    problem_statement?: string;
+    vision?: string;
+  };
+  objectives_goals?: {
+    business_goals?: string[];
+    user_goals?: string[];
+    kpis?: string[];
+  };
+  target_users_personas?: {
+    user_segments?: string[];
+    personas?: UserPersona[];
+    key_pain_points?: string[];
+  };
+  problem_statement_structured?: string;
+  scope?: {
+    in_scope?: string[];
+    out_of_scope?: string[];
+  };
+  features_requirements?: {
+    functional_requirements?: string[];
+    non_functional_requirements?: {
+      performance?: string[];
+      security?: string[];
+      scalability?: string[];
+      reliability?: string[];
+    };
+  };
+  user_flow_journey?: Array<{
+    entry_point?: string;
+    actions?: string[];
+    outcome?: string;
+  }>;
+  wireframes_mockups?: {
+    screens?: Array<{
+      name?: string;
+      purpose?: string;
+      key_elements?: string[];
+    }>;
+    navigation?: string[];
+    layout_ideas?: string[];
+  };
+  timeline_milestones?: Array<{
+    milestone?: string;
+    target_date?: string;
+    description?: string;
+  }>;
+  release_plan?: {
+    phases?: Array<{
+      name?: string;
+      scope?: string[];
+      exit_criteria?: string[];
+    }>;
+    rollout_strategy?: string;
+  };
+  constraints?: string[];
+  compliance_legal?: string[];
+  stakeholders?: Array<{
+    name_or_role?: string;
+    interest?: string;
+    responsibility?: string;
+  }>;
+  open_questions?: string[];
+  appendix?: {
+    research_assumptions?: string[];
+    competitor_notes?: string[];
+    references?: string[];
+  };
+  vision?: string;
+  mission?: string;
+  problem_statement?: string;
+  target_users?: string[];
+  personas?: UserPersona[];
+  user_journey?: string;
+  goals_short_term?: string[];
+  goals_long_term?: string[];
+  non_goals?: string[];
+  feature_requirements?: string[];
   user_stories?: UserStory[];
-  acceptance_criteria: AcceptanceCriterion[];
-  success_metrics: string[];
+  acceptance_criteria?: AcceptanceCriterion[];
+  success_metrics?: string[];
   risk_analysis?: RiskItem[];
   risks?: string[];
   assumptions?: string[];
@@ -131,35 +203,33 @@ export interface ComprehensivePRD {
   dependencies?: string[];
 }
 
-// ============================================
-// SECTION 6: SYSTEM DESIGN
-// ============================================
-
 export interface SystemComponent {
   name: string;
-  type: 'frontend' | 'backend' | 'database' | 'service' | 'infrastructure';
-  description: string;
-  technologies: string[];
-  responsibilities: string[];
+  type?: 'frontend' | 'backend' | 'database' | 'service' | 'infrastructure';
+  description?: string;
+  technologies?: string[];
+  responsibilities?: string[];
+  dependencies?: string[];
+  scalability_considerations?: string;
 }
 
 export interface APIEndpoint {
-  method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
   path: string;
-  description: string;
+  description?: string;
   request_body?: string;
-  response: string;
+  response?: string;
 }
 
 export interface DatabaseSchema {
   table_name: string;
-  description: string;
-  columns: string[];
-  relationships: string[];
+  description?: string;
+  columns?: string[];
+  relationships?: string[];
 }
 
 export interface StrategicSystemDesign {
-  architecture_overview: string;
+  architecture_overview?: string;
   frontend_components?: SystemComponent[];
   backend_services?: SystemComponent[];
   database_design?: DatabaseSchema[];
@@ -168,7 +238,7 @@ export interface StrategicSystemDesign {
   data_flow?: string;
   scalability_strategy?: string;
   security_considerations?: string[];
-  core_components?: any[];
+  core_components?: SystemComponent[];
   data_models?: string;
   api_design?: string;
   scalability_plan?: string;
@@ -181,25 +251,21 @@ export interface StrategicSystemDesign {
   };
 }
 
-// ============================================
-// SECTION 7: DEVELOPMENT TASKS (20-40 tasks)
-// ============================================
-
 export interface StrategicTask {
   id: string;
   title: string;
-  detailed_steps: string[];
+  detailed_steps?: string[];
   type: 'frontend' | 'backend' | 'ai' | 'devops' | 'design' | 'testing' | 'database';
-  tech_stack: string[];
-  dependencies: string[];
+  tech_stack?: string[];
+  dependencies?: string[];
   priority: 'Critical' | 'High' | 'Medium' | 'Low';
-  estimated_time: string;
-  expected_output: string;
+  estimated_time?: string;
+  estimated_hours?: number;
+  expected_output?: string;
+  description?: string;
+  category?: string;
+  complexity?: string;
 }
-
-// ============================================
-// SECTION 8: EXECUTION ROADMAP
-// ============================================
 
 export interface RoadmapPhase {
   phase_name?: string;
@@ -222,16 +288,21 @@ export interface ExecutionRoadmap {
   milestones?: any[];
 }
 
-// ============================================
-// SECTION 9: MANPOWER PLANNING
-// ============================================
-
 export interface TeamRole {
   role: string;
   count: number;
-  skill_level: 'Junior' | 'Mid' | 'Senior' | 'Lead' | 'Principal';
-  responsibilities: string[];
-  skills_required: string[];
+  skill_level?: 'Junior' | 'Mid' | 'Senior' | 'Lead' | 'Principal';
+  responsibilities?: string[];
+  skills_required?: string[];
+}
+
+export interface TeamCost {
+  role: string;
+  count: number;
+  monthly_cost_inr: number;
+  seniority?: 'Junior' | 'Mid' | 'Senior' | 'Lead' | 'Principal' | 'Director' | string;
+  responsibilities?: string[];
+  skills_required?: string[];
 }
 
 export interface ManpowerPlan {
@@ -248,193 +319,150 @@ export interface ManpowerPlan {
     total: number;
   };
   hiring_priority?: string[];
-  team_composition?: any[];
+  team_composition?: TeamCost[];
   hiring_plan?: string;
   total_monthly_cost_inr?: number;
   total_team_size?: number;
 }
 
-// ============================================
-// SECTION 10: RESOURCE REQUIREMENTS
-// ============================================
-
 export interface ResourceItem {
   name: string;
-  category: 'cloud' | 'api' | 'tool' | 'hardware' | 'software' | 'dataset';
-  description: string;
+  category?: 'cloud' | 'api' | 'tool' | 'hardware' | 'software' | 'dataset' | string;
+  description?: string;
   provider?: string;
   estimated_cost?: string;
 }
 
-export interface ResourcePlan {
-  tools_needed: ResourceItem[];
-  third_party_services: ResourceItem[];
-  hardware_software: ResourceItem[];
-  datasets: ResourceItem[];
+export interface InfrastructureCost {
+  service: string;
+  purpose?: string;
+  monthly_cost_inr?: number;
+  scaling_factor?: string;
 }
 
-// ============================================
-// SECTION 11: COST ESTIMATION
-// ============================================
+export interface ThirdPartyService {
+  service?: string;
+  name?: string;
+  category?: 'api' | 'tool' | 'cloud' | string;
+  description?: string;
+  provider?: string;
+  estimated_cost?: string;
+  purpose?: string;
+  monthly_cost_inr?: number;
+}
+
+export interface ResourcePlan {
+  tools_needed?: ResourceItem[];
+  third_party_services?: ThirdPartyService[];
+  hardware_software?: ResourceItem[];
+  datasets?: ResourceItem[];
+  infrastructure_costs?: InfrastructureCost[];
+  total_monthly_infrastructure_cost_inr?: number;
+}
 
 export interface CostBreakdownItem {
   category: string;
   items: {
     name: string;
-    monthly_cost: number;
-    annual_cost: number;
+    monthly_cost?: number;
+    annual_cost?: number;
   }[];
-  subtotal_monthly: number;
-  subtotal_annual: number;
+  subtotal_monthly?: number;
+  subtotal_annual?: number;
 }
 
-// ============================================
-// SECTION 10: RESOURCE PLANNING
-// ============================================
-
-export interface InfrastructureCost {
-  service: string;
-  purpose: string;
-  monthly_cost_inr: number;
-  scaling_factor: string;
-}
-
-export interface ThirdPartyService {
-  service: string;
-  purpose: string;
-  monthly_cost_inr: number;
-}
-
-export interface ResourcePlan {
-  infrastructure_costs: InfrastructureCost[];
-  third_party_services: ThirdPartyService[];
-  total_monthly_infrastructure_cost_inr: number;
-}
-
-// ============================================
-// SECTION 11: COST PLANNING (ENHANCED)
-// ============================================
-
-export interface TeamCost {
-  role: string;
-  count: number;
-  monthly_cost_inr: number;
-  seniority: 'Junior' | 'Mid' | 'Senior' | 'Lead' | 'Principal' | 'Director';
-  responsibilities: string[];
-  skills_required: string[];
+export interface BudgetVersion {
+  name?: string;
+  description?: string;
+  monthly_cost?: number;
+  annual_cost?: number;
+  breakdown?: CostBreakdownItem[];
 }
 
 export interface DevelopmentPhaseCost {
-  mvp: number;
-  growth: number;
-  scale: number;
+  mvp?: number;
+  growth?: number;
+  scale?: number;
 }
 
 export interface OperationalCostsMonthly {
-  team: number;
-  infrastructure: number;
-  marketing: number;
-  others: number;
+  team?: number;
+  infrastructure?: number;
+  marketing?: number;
+  others?: number;
 }
 
 export interface CostPlan {
-  // Development Phase Costs (in INR)
-  development_phase_cost_inr: DevelopmentPhaseCost;
-
-  // Monthly Operational Costs (in INR)
-  operational_costs_monthly_inr: OperationalCostsMonthly;
-
-  // Total First Year Cost (in INR)
-  total_first_year_cost_inr: number;
-
-  // Break-even Analysis
-  break_even_analysis: string;
-
-  // Funding Requirements
-  funding_requirements: string;
-
-  // Budget Scenario Analysis
-  budget_scenarios: {
-    lean_startup: {
-      total_cost_inr: number;
-      runway_months: number;
-      team_size: number;
-      description: string;
+  development_phase_cost_inr?: DevelopmentPhaseCost;
+  operational_costs_monthly_inr?: OperationalCostsMonthly;
+  total_first_year_cost_inr?: number;
+  break_even_analysis?: string;
+  funding_requirements?: string;
+  budget_scenarios?: {
+    lean_startup?: {
+      total_cost_inr?: number;
+      runway_months?: number;
+      team_size?: number | string;
+      description?: string;
     };
-    standard_startup: {
-      total_cost_inr: number;
-      runway_months: number;
-      team_size: number;
-      description: string;
+    standard_startup?: {
+      total_cost_inr?: number;
+      runway_months?: number;
+      team_size?: number | string;
+      description?: string;
     };
-    well_funded: {
-      total_cost_inr: number;
-      runway_months: number;
-      team_size: number;
-      description: string;
+    well_funded?: {
+      total_cost_inr?: number;
+      runway_months?: number;
+      team_size?: number | string;
+      description?: string;
     };
   };
+  monthly_cost_infra_apis?: number;
+  development_cost?: number;
+  operational_cost?: number;
+  engineers_cost?: number;
+  cloud_cost?: number;
+  ai_api_cost?: number;
+  tools_cost?: number;
+  low_budget_version?: BudgetVersion;
+  startup_version?: BudgetVersion;
+  scale_version?: BudgetVersion;
+  total_first_year?: number;
 }
-
-// Legacy budget structure (backwards compatibility)
-export interface BudgetVersion {
-  name: string;
-  description: string;
-  monthly_cost: number;
-  annual_cost: number;
-  breakdown: CostBreakdownItem[];
-}
-
-// Legacy support (keeping old structure for backwards compatibility)
-export interface LegacyCostPlan {
-  monthly_cost_infra_apis: number;
-  development_cost: number;
-  operational_cost: number;
-  engineers_cost: number;
-  cloud_cost: number;
-  ai_api_cost: number;
-  tools_cost: number;
-  low_budget_version: BudgetVersion;
-  startup_version: BudgetVersion;
-  scale_version: BudgetVersion;
-  total_first_year: number;
-}
-
-// ============================================
-// SECTION 12: TIME ESTIMATION
-// ============================================
 
 export interface FeatureTimeEstimate {
   feature_name: string;
-  estimated_weeks: number;
-  dependencies: string[];
+  estimated_weeks?: number;
+  dependencies?: string[];
+}
+
+export interface TimeMilestone {
+  name?: string;
+  target_week?: number;
+  deliverables?: string[];
+  week?: number;
+  milestone?: string;
 }
 
 export interface TimePlan {
-  mvp_timeline: string;
-  full_product_timeline: string;
-  per_feature_estimates: FeatureTimeEstimate[];
-  total_weeks: number;
-  milestones: {
-    name: string;
-    target_week: number;
-    deliverables: string[];
-  }[];
+  mvp_timeline?: any;
+  full_product_timeline?: string;
+  per_feature_estimates?: FeatureTimeEstimate[];
+  total_weeks?: number;
+  milestones?: TimeMilestone[];
+  critical_path?: string[];
 }
 
-// ============================================
-// SECTION 13: IMPACT ANALYSIS
-// ============================================
-
 export interface ImpactAnalysis {
-  user_impact: string;
-  user_impact_score: number; // 0-10
-  business_impact: string;
-  business_impact_score: number; // 0-10
+  user_impact?: string;
+  user_impact_score?: number;
+  business_impact?: string;
+  business_impact_score?: number;
   revenue_potential?: string;
   scalability_potential?: string;
-  confidence_score: number; // 0-100
-  time_to_value: string;
+  confidence_score?: number;
+  time_to_value?: string;
   affected_user_percentage?: number;
   revenue_impact?: string;
   retention_impact?: string;
@@ -443,10 +471,6 @@ export interface ImpactAnalysis {
   long_term_vision?: string;
 }
 
-// ============================================
-// METADATA
-// ============================================
-
 export interface AnalysisMetadata {
   analysis_id: string;
   created_at: string;
@@ -454,60 +478,36 @@ export interface AnalysisMetadata {
   model_used: string;
   input_length: number;
   fallback_mode?: boolean;
+  fallback_reason?: string;
+  extracted_context?: unknown;
+  provider?: string;
+  generated_sections?: StrategySectionId[];
+  section_providers?: Partial<Record<StrategySectionId, string>>;
+  source_input?: string;
+  project_context?: string;
+  detail_level?: string;
+  saved_analysis_id?: string;
+  [key: string]: unknown;
 }
-
-// ============================================
-// COMPLETE STRATEGY RESULT
-// ============================================
 
 export interface ComprehensiveStrategyResult {
-  // Section 1: Executive Dashboard
   executive_dashboard: ExecutiveDashboard;
-
-  // Section 2: Problem Analysis (5-10 problems)
   problem_analysis: StrategicProblem[];
-
-  // Section 3: Feature System (15-30 features)
   feature_system: StrategicFeature[];
-
-  // Section 4: Current Gaps & Opportunities
   gaps_opportunities: GapsOpportunities;
-
-  // Section 5: PRD
   prd: ComprehensivePRD;
-
-  // Section 6: System Design
   system_design: StrategicSystemDesign;
-
-  // Section 7: Development Tasks (20-40 tasks)
   development_tasks: StrategicTask[];
-
-  // Section 8: Execution Roadmap
   execution_roadmap: ExecutionRoadmap;
-
-  // Section 9: Manpower Planning
   manpower_planning: ManpowerPlan;
-
-  // Section 10: Resource Requirements
   resource_requirements: ResourcePlan;
-
-  // Section 11: Cost Estimation (Enhanced)
   cost_estimation: CostPlan;
-  cost_planning: CostPlan; // Enhanced cost planning with INR support
-
-  // Section 12: Time Estimation
+  cost_planning: CostPlan;
   time_estimation: TimePlan;
-
-  // Section 13: Impact Analysis
+  time_planning?: TimePlan;
   impact_analysis: ImpactAnalysis;
-
-  // Metadata
   metadata: AnalysisMetadata;
 }
-
-// ============================================
-// API TYPES
-// ============================================
 
 export interface ComprehensiveAnalyzeRequest {
   project_id?: string;

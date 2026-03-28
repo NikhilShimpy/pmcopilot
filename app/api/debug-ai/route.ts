@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
       });
     }
     
-    console.log('🔍 Testing AI providers...');
+    console.log('🔍 Testing Gemini free-tier configuration...');
 
     // Simple test messages
     const testMessages = [
@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
       success: true,
       provider: result.provider,
       content: result.content,
-      message: 'AI providers working correctly',
+      message: 'Gemini working correctly',
       rateLimitStatus: getRateLimitStatus(),
     });
 
@@ -66,7 +66,7 @@ export async function POST(request: NextRequest) {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
       details: error instanceof Error ? error.stack : undefined,
-      message: 'AI providers failed - check API keys and connectivity',
+      message: 'Gemini check failed - verify free-tier key and model configuration',
       rateLimitStatus: getRateLimitStatus(),
     }, { status: 500 });
   }
@@ -77,6 +77,7 @@ export async function GET() {
     message: 'AI Debug endpoint',
     instructions: {
       test: 'POST {} to test AI providers',
+      provider: 'Gemini free-tier only',
       status: 'POST {"action": "status"} to get rate limit status',
       reset: 'POST {"action": "reset-rate-limits"} to reset rate limits',
     },

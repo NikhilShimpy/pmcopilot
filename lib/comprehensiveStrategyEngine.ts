@@ -142,7 +142,7 @@ function normalizeAIOutput(rawResult: any): any {
     
     // Case 1: Groq returns object with nested structure
     if (!Array.isArray(problems) && typeof problems === 'object') {
-      const normalized Problems: any[] = [];
+      const normalizedProblems: any[] = [];
       
       // Extract primary_problem
       if (problems.primary_problem) {
@@ -1525,7 +1525,7 @@ Output ONLY valid JSON. Start NOW.`,
 
 export async function runComprehensiveStrategyAnalysis(
   rawFeedback: string,
-  context?: PipelineContext & { maxTokens?: number; timeout?: number }
+  context?: PipelineContext & { maxTokens?: number; timeout?: number; depth?: string }
 ): Promise<{
   success: boolean;
   result?: ComprehensiveStrategyResult;
@@ -1683,16 +1683,21 @@ export async function runComprehensiveStrategyAnalysis(
   } catch (error: any) {
     const processingTime = Date.now() - analysisStart;
     const errorMessage = error instanceof Error ? error.message : String(error);
+    const isProviderQuotaIssue =
+      error.shouldFallback === true ||
+      errorMessage.includes('Spending cap exceeded') ||
+      errorMessage.includes('billing limit');
 
     // CHECK FOR CONFIG ERRORS - DO NOT GENERATE FALLBACK
     // Check both the flag AND the error message pattern for robustness
-    const isConfigError = 
-      error.isConfigError === true || 
+    const isConfigError =
+      !isProviderQuotaIssue &&
+      (error.isConfigError === true ||
       errorMessage.includes('GEMINI_CONFIG_ERROR') ||
       errorMessage.includes('Model not found') ||
       errorMessage.includes('Invalid API key') ||
       errorMessage.includes('Permission denied') ||
-      errorMessage.includes('not found for API version');
+      errorMessage.includes('not found for API version'));
 
     if (isConfigError) {
       logger.error('🚫 PROVIDER CONFIG ERROR - NOT USING FALLBACK', {

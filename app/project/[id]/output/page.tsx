@@ -1,5 +1,6 @@
 import { redirect, notFound } from 'next/navigation'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { isValidUUID } from '@/utils/helpers'
 import ProjectOutputClient from './ProjectOutputClient'
 
 interface OutputPageProps {
@@ -45,6 +46,41 @@ export default async function OutputPage({ params, searchParams }: OutputPagePro
 
   const length = (searchParamsResolved.length as string) || 'long'
   const shouldGenerate = searchParamsResolved.generate === 'true'
+  const requestedAnalysisId = (searchParamsResolved.analysis as string) || ''
+
+  let initialAnalysis: any = null
+  let initialAnalysisId: string | null = null
+
+  if (!shouldGenerate) {
+    if (requestedAnalysisId && isValidUUID(requestedAnalysisId)) {
+      const { data: selectedAnalysis } = await supabase
+        .from('analyses')
+        .select('id, result')
+        .eq('id', requestedAnalysisId)
+        .eq('project_id', id)
+        .single()
+
+      if (selectedAnalysis) {
+        initialAnalysis = selectedAnalysis.result
+        initialAnalysisId = selectedAnalysis.id
+      }
+    }
+
+    if (!initialAnalysis) {
+      const { data: latestAnalysis } = await supabase
+        .from('analyses')
+        .select('id, result')
+        .eq('project_id', id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      if (latestAnalysis) {
+        initialAnalysis = latestAnalysis.result
+        initialAnalysisId = latestAnalysis.id
+      }
+    }
+  }
 
   return (
     <ProjectOutputClient
@@ -53,6 +89,8 @@ export default async function OutputPage({ params, searchParams }: OutputPagePro
       initialInput={input}
       outputLength={length as 'short' | 'medium' | 'long' | 'extra-long'}
       shouldGenerate={shouldGenerate}
+      initialAnalysis={initialAnalysis}
+      initialAnalysisId={initialAnalysisId}
     />
   )
 }
