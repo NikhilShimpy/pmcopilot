@@ -345,7 +345,18 @@ export interface StrategicTask {
   id: string;
   title: string;
   detailed_steps?: string[];
-  type: 'frontend' | 'backend' | 'ai' | 'devops' | 'design' | 'testing' | 'database';
+  type:
+    | 'frontend'
+    | 'backend'
+    | 'ai'
+    | 'devops'
+    | 'design'
+    | 'testing'
+    | 'database'
+    | 'data'
+    | 'security'
+    | 'product'
+    | string;
   tech_stack?: string[];
   dependencies?: string[];
   priority: 'Critical' | 'High' | 'Medium' | 'Low';
@@ -355,6 +366,12 @@ export interface StrategicTask {
   description?: string;
   category?: string;
   complexity?: string;
+  why_this_task_matters?: string;
+  linked_features?: string[];
+  section_dependencies?: string[];
+  owner_role?: string;
+  deliverables?: string[];
+  done_criteria?: string[];
 }
 
 export interface RoadmapPhase {

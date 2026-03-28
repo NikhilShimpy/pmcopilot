@@ -12,7 +12,7 @@ import {
 } from '@/lib/sectionedStrategyEngine';
 import { DB_TABLES } from '@/utils/constants';
 import { isValidUUID } from '@/utils/helpers';
-import { StrategySectionId } from '@/types/comprehensive-strategy';
+import { CostIntakeSelections, StrategySectionId } from '@/types/comprehensive-strategy';
 
 type DeferredRouteSection = (typeof DEFERRED_STRATEGY_SECTIONS)[number];
 
@@ -83,6 +83,75 @@ function resolveSection(raw: unknown): StrategySectionId | null {
   }
   const normalized = raw.trim().toLowerCase();
   return SECTION_ALIAS_MAP[normalized] || null;
+}
+
+function sanitizeText(value: unknown, maxLength = 120): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const cleaned = value.replace(/\s+/g, ' ').trim();
+  if (!cleaned) {
+    return undefined;
+  }
+  return cleaned.length > maxLength ? cleaned.slice(0, maxLength) : cleaned;
+}
+
+function sanitizeStringMap(
+  value: unknown,
+  maxLength = 120
+): Record<string, string> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const result: Record<string, string> = {};
+  for (const [key, raw] of Object.entries(value)) {
+    const safeValue = sanitizeText(raw, maxLength);
+    if (safeValue) {
+      result[key] = safeValue;
+    }
+  }
+
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
+function sanitizeCostIntake(raw: unknown): CostIntakeSelections | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return undefined;
+  }
+
+  const source = raw as Record<string, unknown>;
+  const result: CostIntakeSelections = {};
+
+  const buckets: Array<keyof CostIntakeSelections> = [
+    'market_business',
+    'user_scale',
+    'feature_complexity',
+    'technical_complexity',
+    'infrastructure_hosting',
+    'integrations_apis',
+    'design_ux',
+    'security_compliance',
+    'development_factors',
+    'maintenance_scaling',
+    'performance_requirements',
+    'business_model_impact',
+    'product_type',
+  ];
+
+  for (const bucket of buckets) {
+    const sanitized = sanitizeStringMap(source[bucket], 140);
+    if (sanitized) {
+      (result as any)[bucket] = sanitized;
+    }
+  }
+
+  const notes = sanitizeText(source.notes, 1000);
+  if (notes) {
+    result.notes = notes;
+  }
+
+  return Object.keys(result).length > 0 ? result : undefined;
 }
 
 function getSectionData(result: PartialStrategyResult, section: StrategySectionId): unknown {
@@ -198,6 +267,10 @@ export async function handleAnalyzeSectionRequest(
     if (!section || !VALID_SECTIONS.includes(section)) {
       throwValidationError('Invalid section requested');
     }
+    const providedCostIntake = sanitizeCostIntake(body.cost_intake);
+    if (body.cost_intake !== undefined && !providedCostIntake) {
+      throwValidationError('Invalid cost_intake payload');
+    }
 
     const supabase = await createServerSupabaseClient();
     const user = await getUserOrAnonymous();
@@ -238,6 +311,13 @@ export async function handleAnalyzeSectionRequest(
         model_used: 'gemini',
         input_length: 0,
       } as any;
+    }
+
+    if (providedCostIntake) {
+      currentResult.metadata = {
+        ...currentResult.metadata,
+        cost_intake: providedCostIntake,
+      };
     }
 
     const requestedFeedback =
@@ -383,7 +463,8 @@ export async function handleAnalyzeSectionRequest(
           body.context &&
           typeof (body.context as any).project_name === 'string'
             ? (body.context as any).project_name
-            : undefined) || currentResult.metadata?.project_context,
+            : undefined) ||
+          (currentResult.metadata?.project_name as string | undefined),
         project_context:
           (typeof body.context === 'object' &&
           body.context &&
@@ -415,6 +496,12 @@ export async function handleAnalyzeSectionRequest(
       saved_analysis_id: analysisId,
       source_input: rawFeedback,
       input_hash: inputHash,
+      project_name:
+        (generated.result.metadata?.project_name as string | undefined) ||
+        (currentResult.metadata?.project_name as string | undefined),
+      cost_intake:
+        (generated.result.metadata?.cost_intake as CostIntakeSelections | undefined) ||
+        (currentResult.metadata?.cost_intake as CostIntakeSelections | undefined),
       stale_sections: (
         Array.isArray(generated.result.metadata?.stale_sections)
           ? generated.result.metadata.stale_sections
@@ -450,7 +537,12 @@ export async function handleAnalyzeSectionRequest(
       )
     );
   } catch (error) {
-    logger.apiResponse('POST', routePath, 500, {
+    const typedError = error as Error & {
+      isGeminiPoolExhausted?: boolean;
+      isConfigError?: boolean;
+    };
+    const statusCode = typedError.isGeminiPoolExhausted ? 429 : 500;
+    logger.apiResponse('POST', routePath, statusCode, {
       error: error instanceof Error ? error.message : 'Unknown error',
     });
     return handleError(error);

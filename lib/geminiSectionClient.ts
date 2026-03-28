@@ -21,10 +21,17 @@ interface GeminiResponse {
   };
 }
 
+type GeminiKeyStatus = 'active' | 'cooling_down' | 'exhausted' | 'invalid';
+
 interface GeminiKeyState {
+  status: GeminiKeyStatus;
   backoffUntil: Date | null;
   consecutiveErrors: number;
+  totalErrors: number;
+  inFlight: number;
   lastError: string | null;
+  lastSelectedAt: Date | null;
+  lastSuccessAt: Date | null;
 }
 
 interface GeminiRequestOptions {
@@ -57,9 +64,14 @@ function getKeyState(apiKey: string): GeminiKeyState {
   }
 
   const initialState: GeminiKeyState = {
+    status: 'active',
     backoffUntil: null,
     consecutiveErrors: 0,
+    totalErrors: 0,
+    inFlight: 0,
     lastError: null,
+    lastSelectedAt: null,
+    lastSuccessAt: null,
   };
   geminiKeyState.set(apiKey, initialState);
   return initialState;
@@ -70,39 +82,78 @@ function getKeySlot(apiKey: string): number {
   return index >= 0 ? index + 1 : 0;
 }
 
-function isKeyCoolingDown(apiKey: string): boolean {
-  const state = getKeyState(apiKey);
-  return !!state.backoffUntil && new Date() < state.backoffUntil;
+function refreshKeyAvailability(state: GeminiKeyState) {
+  if (state.status === 'invalid') {
+    return;
+  }
+
+  if (state.backoffUntil && Date.now() >= state.backoffUntil.getTime()) {
+    state.status = 'active';
+    state.backoffUntil = null;
+    state.lastError = null;
+    state.consecutiveErrors = 0;
+  }
 }
 
-function getOrderedAvailableKeys(): string[] {
+function isKeyEligible(apiKey: string): boolean {
+  const state = getKeyState(apiKey);
+  refreshKeyAvailability(state);
+  if (state.status === 'invalid') {
+    return false;
+  }
+  return !state.backoffUntil || Date.now() >= state.backoffUntil.getTime();
+}
+
+function claimNextEligibleKey(
+  excludedKeys: Set<string>
+): { apiKey: string; keySlot: number } | null {
   const keys = getGeminiKeys();
   if (keys.length === 0) {
-    return [];
+    return null;
   }
 
-  const availableKeys = keys.filter((key) => !isKeyCoolingDown(key));
-  if (availableKeys.length === 0) {
-    return [];
+  const startCursor = geminiKeyCursor;
+  for (let checked = 0; checked < keys.length; checked++) {
+    const index = (startCursor + checked) % keys.length;
+    const apiKey = keys[index];
+
+    if (excludedKeys.has(apiKey)) {
+      continue;
+    }
+
+    if (!isKeyEligible(apiKey)) {
+      continue;
+    }
+
+    const state = getKeyState(apiKey);
+    geminiKeyCursor = (index + 1) % keys.length;
+    state.inFlight += 1;
+    state.lastSelectedAt = new Date();
+
+    logger.info('Gemini key selected', {
+      keySlot: getKeySlot(apiKey),
+      status: state.status,
+      inFlight: state.inFlight,
+    });
+
+    return { apiKey, keySlot: getKeySlot(apiKey) };
   }
 
-  const startIndex = geminiKeyCursor % availableKeys.length;
-  return [
-    ...availableKeys.slice(startIndex),
-    ...availableKeys.slice(0, startIndex),
-  ];
+  return null;
+}
+
+function releaseKeyReservation(apiKey: string) {
+  const state = getKeyState(apiKey);
+  state.inFlight = Math.max(0, state.inFlight - 1);
 }
 
 function markKeySuccess(apiKey: string) {
   const state = getKeyState(apiKey);
+  state.status = 'active';
   state.backoffUntil = null;
   state.consecutiveErrors = 0;
   state.lastError = null;
-
-  const keys = getGeminiKeys();
-  if (keys.length > 0) {
-    geminiKeyCursor = (getKeySlot(apiKey) % keys.length);
-  }
+  state.lastSuccessAt = new Date();
 }
 
 function markKeyBackoff(
@@ -112,15 +163,29 @@ function markKeyBackoff(
   message: string
 ) {
   const state = getKeyState(apiKey);
-  state.consecutiveErrors += 1;
-  state.lastError = message;
-  state.backoffUntil = new Date(Date.now() + backoffSeconds * 1000);
+  const now = Date.now();
 
-  logger.warn('Gemini key moved to backoff', {
+  const status: GeminiKeyStatus =
+    reason === 'invalid_key' || reason === 'permission'
+      ? 'invalid'
+      : reason === 'spending_cap'
+      ? 'exhausted'
+      : 'cooling_down';
+
+  state.status = status;
+  state.consecutiveErrors += 1;
+  state.totalErrors += 1;
+  state.lastError = message;
+  state.backoffUntil =
+    backoffSeconds > 0 ? new Date(now + backoffSeconds * 1000) : null;
+
+  logger.warn('Gemini key state changed', {
     keySlot: getKeySlot(apiKey),
+    status,
     reason,
     backoffSeconds,
-    backoffUntil: state.backoffUntil.toISOString(),
+    backoffUntil: state.backoffUntil?.toISOString() || null,
+    consecutiveErrors: state.consecutiveErrors,
   });
 }
 
@@ -140,6 +205,21 @@ function classifyGeminiKeyError(error: any): GeminiKeyErrorClassification {
       ? error.response.data
       : JSON.stringify(error.response.data || '');
   const normalizedMessage = rawMessage.toLowerCase();
+
+  if (status === 400) {
+    if (
+      normalizedMessage.includes('api key not valid') ||
+      normalizedMessage.includes('invalid api key') ||
+      normalizedMessage.includes('invalid key')
+    ) {
+      return {
+        kind: 'key_error',
+        message: 'Gemini API key is invalid',
+        backoffSeconds: 86400,
+        reason: 'invalid_key',
+      };
+    }
+  }
 
   if (status === 400 || status === 404) {
     return {
@@ -175,13 +255,14 @@ function classifyGeminiKeyError(error: any): GeminiKeyErrorClassification {
   if (status === 429) {
     if (
       normalizedMessage.includes('spending cap') ||
-      normalizedMessage.includes('billing')
+      normalizedMessage.includes('billing') ||
+      normalizedMessage.includes('quota')
     ) {
       return {
         kind: 'quota',
         message:
           'Gemini free-tier quota/cap was reached for this key. Retry later or reduce request size.',
-        backoffSeconds: 900,
+        backoffSeconds: 1200,
         reason: 'spending_cap',
       };
     }
@@ -189,7 +270,7 @@ function classifyGeminiKeyError(error: any): GeminiKeyErrorClassification {
     return {
       kind: 'quota',
       message: 'Gemini rate limit hit for this key',
-      backoffSeconds: 180,
+      backoffSeconds: 240,
       reason: 'rate_limit',
     };
   }
@@ -289,12 +370,22 @@ async function requestGeminiWithKey(
 export function getGeminiKeyPoolStatus() {
   return getGeminiKeys().map((apiKey) => {
     const state = getKeyState(apiKey);
+    refreshKeyAvailability(state);
+    const now = Date.now();
+    const coolingDown =
+      !!state.backoffUntil && state.backoffUntil.getTime() > now;
     return {
       keySlot: getKeySlot(apiKey),
-      coolingDown: isKeyCoolingDown(apiKey),
+      status: state.status,
+      available: isKeyEligible(apiKey),
+      coolingDown,
       backoffUntil: state.backoffUntil?.toISOString() || null,
+      inFlight: state.inFlight,
       consecutiveErrors: state.consecutiveErrors,
+      totalErrors: state.totalErrors,
       lastError: state.lastError,
+      lastSelectedAt: state.lastSelectedAt?.toISOString() || null,
+      lastSuccessAt: state.lastSuccessAt?.toISOString() || null,
     };
   });
 }
@@ -303,30 +394,37 @@ export async function generateGeminiContent(
   messages: GeminiMessage[],
   options: GeminiRequestOptions = {}
 ): Promise<{ content: string; provider: 'gemini'; keySlot: number }> {
-  const orderedKeys = getOrderedAvailableKeys();
-
-  if (orderedKeys.length === 0) {
-    const poolError = new Error(
-      'All configured Gemini API keys are cooling down or exhausted. Add another Gemini key or wait for a key backoff window to expire.'
+  const keys = getGeminiKeys();
+  if (keys.length === 0) {
+    const missingKeysError = new Error(
+      'No Gemini API keys configured. Set GEMINI_API_KEYS or GEMINI_API_KEY_1..GEMINI_API_KEY_20.'
     );
-    (poolError as any).isGeminiPoolExhausted = true;
-    throw poolError;
+    (missingKeysError as any).isGeminiPoolExhausted = true;
+    throw missingKeysError;
   }
 
+  const attemptedKeys = new Set<string>();
   let lastError: Error | null = null;
 
-  for (const apiKey of orderedKeys) {
+  while (attemptedKeys.size < keys.length) {
+    const candidate = claimNextEligibleKey(attemptedKeys);
+    if (!candidate) {
+      break;
+    }
+
+    const { apiKey, keySlot } = candidate;
+    attemptedKeys.add(apiKey);
+
     try {
       const content = await requestGeminiWithKey(apiKey, messages, options);
       markKeySuccess(apiKey);
       return {
         content,
         provider: 'gemini',
-        keySlot: getKeySlot(apiKey),
+        keySlot,
       };
     } catch (error: any) {
       const classification = classifyGeminiKeyError(error);
-      const keySlot = getKeySlot(apiKey);
 
       logger.warn('Gemini key request failed', {
         keySlot,
@@ -348,13 +446,33 @@ export async function generateGeminiContent(
       );
 
       lastError = new Error(`Gemini key ${keySlot} failed: ${classification.message}`);
+    } finally {
+      releaseKeyReservation(apiKey);
     }
+  }
+
+  const keyStatus = getGeminiKeyPoolStatus();
+  logger.error('Gemini key pool exhausted', {
+    attemptedKeys: attemptedKeys.size,
+    poolSize: keys.length,
+    keyStatus,
+    lastError: lastError?.message || null,
+  });
+
+  if (attemptedKeys.size === 0) {
+    const poolError = new Error(
+      'All configured Gemini API keys are cooling down or exhausted. Add another Gemini key or wait for a key backoff window to expire.'
+    );
+    (poolError as any).isGeminiPoolExhausted = true;
+    (poolError as any).keyPoolStatus = keyStatus;
+    throw poolError;
   }
 
   const poolError = new Error(
     lastError?.message ||
-      'All configured Gemini API keys failed for this request.'
+      'All configured Gemini API keys failed for this request. Add more free-tier keys or wait for backoff.'
   );
   (poolError as any).isGeminiPoolExhausted = true;
+  (poolError as any).keyPoolStatus = keyStatus;
   throw poolError;
 }

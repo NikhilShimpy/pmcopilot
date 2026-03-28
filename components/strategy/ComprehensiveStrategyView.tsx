@@ -130,6 +130,21 @@ export default function ComprehensiveStrategyView({
     }
   }
 
+  const formatScoreOutOfTen = (value: unknown) => {
+    const numeric = Number(value)
+    if (!Number.isFinite(numeric)) return '0.0'
+    if (numeric <= 10) return Math.max(0, Math.min(10, numeric)).toFixed(1)
+    if (numeric <= 100) return (numeric / 10).toFixed(1)
+    return '10.0'
+  }
+
+  const formatConfidencePercent = (value: unknown) => {
+    const numeric = Number(value)
+    if (!Number.isFinite(numeric)) return '0'
+    if (numeric <= 1) return Math.max(0, Math.min(100, numeric * 100)).toFixed(0)
+    return Math.max(0, Math.min(100, numeric)).toFixed(0)
+  }
+
   // Handle drag start for items
   const handleDragStart = (e: React.DragEvent, type: 'problem' | 'feature' | 'task', payload: any) => {
     e.dataTransfer.setData('application/json', JSON.stringify({ type, payload }))
@@ -212,7 +227,7 @@ export default function ComprehensiveStrategyView({
                   {/* Key Metrics */}
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     <div className="p-4 bg-blue-50 rounded-xl text-center">
-                      <p className="text-3xl font-bold text-blue-600">{result.executive_dashboard.innovation_score}/10</p>
+                      <p className="text-3xl font-bold text-blue-600">{formatScoreOutOfTen(result.executive_dashboard.innovation_score)}/10</p>
                       <p className="text-sm text-gray-600">Innovation Score</p>
                     </div>
                     <div className="p-4 bg-purple-50 rounded-xl text-center">
@@ -1414,7 +1429,7 @@ export default function ComprehensiveStrategyView({
               </div>
               <div className="text-left">
                 <h2 className="text-lg font-bold text-gray-900">Impact Analysis</h2>
-                <p className="text-sm text-gray-500">Confidence: {result.impact_analysis?.confidence_score || 0}%</p>
+                <p className="text-sm text-gray-500">Confidence: {formatConfidencePercent(result.impact_analysis?.confidence_score)}%</p>
               </div>
             </div>
             {expandedSections.impact ? (
@@ -1435,15 +1450,15 @@ export default function ComprehensiveStrategyView({
                   {/* Scores */}
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     <div className="p-4 bg-blue-50 rounded-xl text-center">
-                      <p className="text-3xl font-bold text-blue-600">{result.impact_analysis.user_impact_score}/10</p>
+                      <p className="text-3xl font-bold text-blue-600">{formatScoreOutOfTen(result.impact_analysis.user_impact_score)}/10</p>
                       <p className="text-xs text-gray-600">User Impact</p>
                     </div>
                     <div className="p-4 bg-green-50 rounded-xl text-center">
-                      <p className="text-3xl font-bold text-green-600">{result.impact_analysis.business_impact_score}/10</p>
+                      <p className="text-3xl font-bold text-green-600">{formatScoreOutOfTen(result.impact_analysis.business_impact_score)}/10</p>
                       <p className="text-xs text-gray-600">Business Impact</p>
                     </div>
                     <div className="p-4 bg-purple-50 rounded-xl text-center">
-                      <p className="text-3xl font-bold text-purple-600">{result.impact_analysis.confidence_score}%</p>
+                      <p className="text-3xl font-bold text-purple-600">{formatConfidencePercent(result.impact_analysis.confidence_score)}%</p>
                       <p className="text-xs text-gray-600">Confidence</p>
                     </div>
                     <div className="p-4 bg-orange-50 rounded-xl text-center">

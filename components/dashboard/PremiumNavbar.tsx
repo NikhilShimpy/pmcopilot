@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Search,
@@ -16,21 +17,35 @@ import {
   Sparkles,
   Keyboard,
 } from 'lucide-react'
+import type { Project } from '@/types'
 
 interface PremiumNavbarProps {
   user: {
     id: string
     email?: string | null
   }
+  projects: Project[]
+  searchQuery: string
+  onSearchQueryChange: (value: string) => void
   onCreateProject: () => void
 }
 
-export default function PremiumNavbar({ user, onCreateProject }: PremiumNavbarProps) {
+export default function PremiumNavbar({
+  user,
+  projects,
+  searchQuery,
+  onSearchQueryChange,
+  onCreateProject,
+}: PremiumNavbarProps) {
+  const router = useRouter()
   const [showSearch, setShowSearch] = useState(false)
-  const [searchQuery, setSearchQuery] = useState('')
   const [showUserMenu, setShowUserMenu] = useState(false)
   const [showNotifications, setShowNotifications] = useState(false)
   const searchInputRef = useRef<HTMLInputElement>(null)
+
+  const filteredProjects = searchQuery.trim()
+    ? projects.filter((project) => project.name.toLowerCase().includes(searchQuery.trim().toLowerCase()))
+    : projects.slice(0, 6)
 
   // Handle keyboard shortcuts
   useEffect(() => {
@@ -296,7 +311,7 @@ export default function PremiumNavbar({ user, onCreateProject }: PremiumNavbarPr
                     ref={searchInputRef}
                     type="text"
                     value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onChange={(e) => onSearchQueryChange(e.target.value)}
                     placeholder="Search projects, analysis, or ask AI..."
                     className="flex-1 bg-transparent text-gray-900 dark:text-white
                       text-lg placeholder-gray-500 dark:placeholder-gray-400
@@ -357,11 +372,31 @@ export default function PremiumNavbar({ user, onCreateProject }: PremiumNavbarPr
                 {/* Recent Projects */}
                 <div className="p-4 border-t border-gray-200 dark:border-gray-700">
                   <p className="text-xs font-semibold text-gray-400 uppercase mb-3">
-                    Recent Projects
+                    {searchQuery.trim() ? 'Search Results' : 'Recent Projects'}
                   </p>
-                  <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-4">
-                    Start typing to search...
-                  </p>
+                  {filteredProjects.length > 0 ? (
+                    <div className="space-y-2 max-h-64 overflow-y-auto">
+                      {filteredProjects.map((project) => (
+                        <button
+                          key={project.id}
+                          onClick={() => {
+                            setShowSearch(false)
+                            router.push(`/project/${project.id}`)
+                          }}
+                          className="w-full text-left px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                        >
+                          <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{project.name}</p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                            {project.description || 'Open project workspace'}
+                          </p>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-4">
+                      No projects found for &quot;{searchQuery}&quot;.
+                    </p>
+                  )}
                 </div>
               </div>
             </motion.div>

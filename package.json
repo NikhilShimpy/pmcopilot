@@ -6,7 +6,7 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint . --ext .ts,.tsx,.js,.jsx",
     "type-check": "tsc --noEmit",
     "setup": "node scripts/setup.js",
     "setup:wizard": "npm run dev & open http://localhost:3000/setup",

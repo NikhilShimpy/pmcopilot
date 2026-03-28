@@ -293,6 +293,11 @@ export async function POST(request: NextRequest) {
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Overview generation failed';
+      const typedError = error as Error & {
+        isGeminiPoolExhausted?: boolean;
+        keyPoolStatus?: unknown;
+        isConfigError?: boolean;
+      };
       logger.error('Overview analysis failed', {
         requestId,
         error: errorMessage,
@@ -303,9 +308,12 @@ export async function POST(request: NextRequest) {
           success: false,
           error: errorMessage,
           provider: 'gemini',
+          ...(typedError.isGeminiPoolExhausted
+            ? { key_pool_status: typedError.keyPoolStatus || undefined }
+            : {}),
         }),
         {
-          status: 500,
+          status: typedError.isGeminiPoolExhausted ? 429 : 500,
           headers: { 'Content-Type': 'application/json' },
         }
       );
