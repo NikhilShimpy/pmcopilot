@@ -100,6 +100,20 @@ interface ProjectOutputClientProps {
   initialAnalysisId?: string | null
 }
 
+interface StructuredChatAnswer {
+  direct_answer: string
+  key_insights: string[]
+  recommended_action: string[]
+  risks_notes: string[]
+  next_step: string[]
+}
+
+interface ChatPanelMessage {
+  role: 'user' | 'assistant'
+  content: string
+  structured?: StructuredChatAnswer | null
+}
+
 type AnalysisResultState = Partial<ComprehensiveStrategyResult> & {
   metadata?: {
     analysis_id?: string
@@ -156,7 +170,7 @@ export default function ProjectOutputClient({
   const [chatFullscreen, setChatFullscreen] = useState(false)
   const [chatZoomLevel, setChatZoomLevel] = useState(1) // 1 = normal, 0.8 = zoom out, 1.2 = zoom in
   const [chatInput, setChatInput] = useState('')
-  const [chatMessages, setChatMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([])
+  const [chatMessages, setChatMessages] = useState<ChatPanelMessage[]>([])
   const [isChatStreaming, setIsChatStreaming] = useState(false)
 
   // Export state
@@ -174,6 +188,37 @@ export default function ProjectOutputClient({
     return Boolean(
       result.executive_dashboard ||
       (result as any).overview_summary
+    )
+  }, [])
+
+  const isPrdComplete = useCallback((prd: any) => {
+    if (!prd || typeof prd !== 'object') return false
+    const hasItems = (value: any) => Array.isArray(value) && value.length > 0
+    return Boolean(
+      prd.product_overview?.product_name &&
+      prd.product_overview?.problem_statement &&
+      hasItems(prd.objectives_goals?.business_goals) &&
+      hasItems(prd.target_users_personas?.user_segments) &&
+      prd.problem_statement_structured &&
+      hasItems(prd.scope?.in_scope) &&
+      hasItems(prd.features_requirements?.functional_requirements) &&
+      hasItems(prd.user_stories) &&
+      hasItems(prd.user_flow_journey) &&
+      hasItems(prd.wireframes_mockups?.screens) &&
+      hasItems(prd.acceptance_criteria) &&
+      hasItems(prd.success_metrics) &&
+      hasItems(prd.risks_assumptions?.risks) &&
+      hasItems(prd.risks_assumptions?.assumptions) &&
+      hasItems(prd.dependencies) &&
+      hasItems(prd.timeline_milestones) &&
+      hasItems(prd.release_plan?.phases) &&
+      hasItems(prd.constraints) &&
+      hasItems(prd.compliance_legal) &&
+      hasItems(prd.stakeholders) &&
+      hasItems(prd.open_questions) &&
+      hasItems(prd.appendix?.research_assumptions) &&
+      hasItems(prd.appendix?.competitor_notes) &&
+      hasItems(prd.appendix?.references)
     )
   }, [])
 
@@ -220,6 +265,21 @@ export default function ProjectOutputClient({
         return false
       }
 
+      const inputSample = (result.metadata?.source_input || initialInput || '') as string
+      const minimumCount = inputSample.trim().length >= 80 ? 10 : 8
+
+      if (section === 'problem-analysis') {
+        return Array.isArray(result.problem_analysis) && result.problem_analysis.length >= minimumCount
+      }
+
+      if (section === 'feature-system') {
+        return Array.isArray(result.feature_system) && result.feature_system.length >= minimumCount
+      }
+
+      if (section === 'prd') {
+        return isPrdComplete(result.prd)
+      }
+
       if (
         section === 'all' ||
         section === 'executive-dashboard'
@@ -237,7 +297,7 @@ export default function ProjectOutputClient({
 
       return sectionInputHash === inputHash && !isStale
     },
-    [analysisResult, hasSectionContent]
+    [analysisResult, hasSectionContent, initialInput, isPrdComplete]
   )
 
   // Clean URL after generation to prevent re-triggers on refresh/navigation
@@ -577,7 +637,7 @@ export default function ProjectOutputClient({
           projectName: project.name,
           projectIdea: analysisResult?.metadata?.source_input || initialInput || '',
           analysis: analysisContext,
-          history: chatMessages.slice(-6),
+          history: chatMessages.slice(-6).map(({ role, content }) => ({ role, content })),
         }),
       })
 
@@ -587,33 +647,76 @@ export default function ProjectOutputClient({
       if (!reader) throw new Error('No response body')
 
       let assistantMessage = ''
-      setChatMessages(prev => [...prev, { role: 'assistant', content: '' }])
+      let structuredAnswer: StructuredChatAnswer | null = null
+      let sseBuffer = ''
+      setChatMessages(prev => [...prev, { role: 'assistant', content: '', structured: null }])
+
+      const normalizeStructured = (value: any): StructuredChatAnswer => ({
+        direct_answer: typeof value?.direct_answer === 'string' ? value.direct_answer : '',
+        key_insights: Array.isArray(value?.key_insights) ? value.key_insights.map(String).filter(Boolean) : [],
+        recommended_action: Array.isArray(value?.recommended_action) ? value.recommended_action.map(String).filter(Boolean) : [],
+        risks_notes: Array.isArray(value?.risks_notes) ? value.risks_notes.map(String).filter(Boolean) : [],
+        next_step: Array.isArray(value?.next_step) ? value.next_step.map(String).filter(Boolean) : [],
+      })
+
+      const updateAssistantMessage = () => {
+        setChatMessages(prev => {
+          const updated = [...prev]
+          updated[updated.length - 1] = {
+            role: 'assistant',
+            content: assistantMessage,
+            structured: structuredAnswer,
+          }
+          return updated
+        })
+      }
+
+      const handleSseEvent = (rawEvent: string) => {
+        const lines = rawEvent
+          .split('\n')
+          .map(line => line.trim())
+          .filter(Boolean)
+
+        for (const line of lines) {
+          if (!line.startsWith('data:')) continue
+          const payload = line.slice(5).trim()
+          if (!payload || payload === '[DONE]') continue
+
+          const parsed = JSON.parse(payload)
+
+          if (typeof parsed.content === 'string') {
+            assistantMessage += parsed.content
+          }
+
+          if (parsed.structured && typeof parsed.structured === 'object') {
+            structuredAnswer = normalizeStructured(parsed.structured)
+          }
+
+          if (parsed.error) {
+            throw new Error(parsed.error)
+          }
+
+          updateAssistantMessage()
+        }
+      }
 
       const decoder = new TextDecoder()
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
 
-        const chunk = decoder.decode(value)
-        const lines = chunk.split('\n')
+        sseBuffer += decoder.decode(value, { stream: true })
+        const events = sseBuffer.split('\n\n')
+        sseBuffer = events.pop() || ''
 
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6)
-            if (data === '[DONE]') continue
-            try {
-              const parsed = JSON.parse(data)
-              if (parsed.content) {
-                assistantMessage += parsed.content
-                setChatMessages(prev => {
-                  const updated = [...prev]
-                  updated[updated.length - 1] = { role: 'assistant', content: assistantMessage }
-                  return updated
-                })
-              }
-            } catch {}
-          }
+        for (const event of events) {
+          if (!event.trim()) continue
+          handleSseEvent(event)
         }
+      }
+
+      if (sseBuffer.trim()) {
+        handleSseEvent(sseBuffer)
       }
 
       // Save chat to database after completion
@@ -1496,25 +1599,33 @@ ${content
                         : 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white'
                       }`}>
                       {msg.role === 'assistant' ? (
-                        <ReactMarkdown
-                          className={`prose dark:prose-invert max-w-none
-                            prose-headings:font-semibold prose-headings:mt-4 prose-headings:mb-2
-                            prose-p:my-2 prose-p:leading-relaxed
-                            prose-ul:my-2 prose-ol:my-2 prose-li:my-1
-                            prose-strong:font-semibold prose-strong:text-gray-900 dark:prose-strong:text-white
-                            prose-code:bg-gray-200 dark:prose-code:bg-gray-700 prose-code:px-1 prose-code:py-0.5 prose-code:rounded
-                            prose-pre:bg-gray-200 dark:prose-pre:bg-gray-700 prose-pre:p-3 prose-pre:rounded-lg
-                            prose-table:border-collapse prose-table:w-full
-                            prose-th:border prose-th:border-gray-300 dark:prose-th:border-gray-600 prose-th:p-2 prose-th:bg-gray-100 dark:prose-th:bg-gray-800
-                            prose-td:border prose-td:border-gray-300 dark:prose-td:border-gray-600 prose-td:p-2
-                            prose-a:text-blue-600 hover:prose-a:text-blue-700
-                            ${chatFullscreen
-                              ? 'prose-lg prose-h1:text-2xl prose-h2:text-xl prose-h3:text-lg'
-                              : 'prose-sm prose-h1:text-xl prose-h2:text-lg prose-h3:text-base'
-                            }`}
-                        >
-                          {msg.content}
-                        </ReactMarkdown>
+                        msg.structured ? (
+                          <StructuredAnswerView
+                            answer={msg.structured}
+                            markdown={msg.content}
+                            compact={!chatFullscreen}
+                          />
+                        ) : (
+                          <ReactMarkdown
+                            className={`prose dark:prose-invert max-w-none
+                              prose-headings:font-semibold prose-headings:mt-4 prose-headings:mb-2
+                              prose-p:my-2 prose-p:leading-relaxed
+                              prose-ul:my-2 prose-ol:my-2 prose-li:my-1
+                              prose-strong:font-semibold prose-strong:text-gray-900 dark:prose-strong:text-white
+                              prose-code:bg-gray-200 dark:prose-code:bg-gray-700 prose-code:px-1 prose-code:py-0.5 prose-code:rounded
+                              prose-pre:bg-gray-200 dark:prose-pre:bg-gray-700 prose-pre:p-3 prose-pre:rounded-lg
+                              prose-table:border-collapse prose-table:w-full
+                              prose-th:border prose-th:border-gray-300 dark:prose-th:border-gray-600 prose-th:p-2 prose-th:bg-gray-100 dark:prose-th:bg-gray-800
+                              prose-td:border prose-td:border-gray-300 dark:prose-td:border-gray-600 prose-td:p-2
+                              prose-a:text-blue-600 hover:prose-a:text-blue-700
+                              ${chatFullscreen
+                                ? 'prose-lg prose-h1:text-2xl prose-h2:text-xl prose-h3:text-lg'
+                                : 'prose-sm prose-h1:text-xl prose-h2:text-lg prose-h3:text-base'
+                              }`}
+                          >
+                            {msg.content}
+                          </ReactMarkdown>
+                        )
                       ) : (
                         <p className={`whitespace-pre-wrap ${chatFullscreen ? 'text-base' : 'text-sm'}`}>
                           {msg.content}
@@ -1613,7 +1724,11 @@ function SidebarItem({ section, isActive, isCollapsed, onClick }: SidebarItemPro
         }
         ${isCollapsed ? 'justify-center' : ''}`}
     >
-      <section.icon className={`w-5 h-5 ${isActive ? 'text-blue-500' : ''}`} />
+      <section.icon
+        className={`w-5 h-5 flex-shrink-0 ${
+          isActive ? 'text-blue-500 dark:text-blue-400' : 'text-gray-500 dark:text-gray-300'
+        }`}
+      />
       {!isCollapsed && (
         <span className="text-sm font-medium truncate">{section.label}</span>
       )}
@@ -2724,6 +2839,15 @@ function AllSectionsView({
         ? readyText
         : pendingText
 
+  const colorStyles: Record<string, { bg: string; text: string }> = {
+    blue: { bg: 'bg-blue-100 dark:bg-blue-900/30', text: 'text-blue-500 dark:text-blue-300' },
+    red: { bg: 'bg-red-100 dark:bg-red-900/30', text: 'text-red-500 dark:text-red-300' },
+    purple: { bg: 'bg-purple-100 dark:bg-purple-900/30', text: 'text-purple-500 dark:text-purple-300' },
+    emerald: { bg: 'bg-emerald-100 dark:bg-emerald-900/30', text: 'text-emerald-500 dark:text-emerald-300' },
+    amber: { bg: 'bg-amber-100 dark:bg-amber-900/30', text: 'text-amber-500 dark:text-amber-300' },
+    cyan: { bg: 'bg-cyan-100 dark:bg-cyan-900/30', text: 'text-cyan-500 dark:text-cyan-300' },
+  }
+
   const sectionSummaries = [
     {
       id: 'prd' as SectionId,
@@ -2816,32 +2940,107 @@ function AllSectionsView({
 
       {/* Section Cards */}
       <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {sectionSummaries.map((section) => (
-          <motion.button
-            key={section.id}
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-            onClick={() => onSectionClick(section.id)}
-            className="p-6 bg-white dark:bg-gray-900 rounded-2xl
-              border border-gray-200 dark:border-gray-800
-              hover:border-gray-300 dark:hover:border-gray-700
-              text-left transition-all group"
-          >
-            <div className={`w-12 h-12 rounded-xl mb-4
-              flex items-center justify-center
-              bg-${section.color}-100 dark:bg-${section.color}-900/30`}>
-              <section.icon className={`w-6 h-6 text-${section.color}-500`} />
-            </div>
-            <h4 className="font-semibold text-gray-900 dark:text-white mb-2
-              group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
-              {section.title}
-            </h4>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              {section.summary}
-            </p>
-          </motion.button>
-        ))}
+        {sectionSummaries.map((section) => {
+          const style = colorStyles[section.color] || colorStyles.blue
+          return (
+            <motion.button
+              key={section.id}
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={() => onSectionClick(section.id)}
+              className="p-6 bg-white dark:bg-gray-900 rounded-2xl
+                border border-gray-200 dark:border-gray-800
+                hover:border-gray-300 dark:hover:border-gray-700
+                text-left transition-all group"
+            >
+              <div className={`w-12 h-12 rounded-xl mb-4 flex items-center justify-center ${style.bg}`}>
+                <section.icon className={`w-6 h-6 ${style.text}`} />
+              </div>
+              <h4 className="font-semibold text-gray-900 dark:text-white mb-2
+                group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                {section.title}
+              </h4>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                {section.summary}
+              </p>
+            </motion.button>
+          )
+        })}
       </div>
+    </div>
+  )
+}
+
+function StructuredAnswerView({
+  answer,
+  markdown,
+  compact = false,
+}: {
+  answer: StructuredChatAnswer
+  markdown: string
+  compact?: boolean
+}) {
+  const blocks = [
+    {
+      title: 'Direct Answer',
+      type: 'text' as const,
+      value: answer.direct_answer || 'Not enough context yet.',
+    },
+    {
+      title: 'Key Insights',
+      type: 'list' as const,
+      value: answer.key_insights,
+    },
+    {
+      title: 'Recommended Action',
+      type: 'list' as const,
+      value: answer.recommended_action,
+    },
+    {
+      title: 'Risks / Notes',
+      type: 'list' as const,
+      value: answer.risks_notes,
+    },
+    {
+      title: 'Next Step',
+      type: 'list' as const,
+      value: answer.next_step,
+    },
+  ]
+
+  return (
+    <div className={`space-y-3 ${compact ? 'text-sm' : 'text-base'}`}>
+      {blocks.map((block) => (
+        <div
+          key={block.title}
+          className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white/70 dark:bg-gray-900/40 p-3"
+        >
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400 mb-2">
+            {block.title}
+          </h4>
+          {block.type === 'text' ? (
+            <p className="text-gray-800 dark:text-gray-200 leading-relaxed">{block.value as string}</p>
+          ) : (
+            <ul className="space-y-1.5">
+              {(block.value as string[]).length > 0 ? (
+                (block.value as string[]).map((item, index) => (
+                  <li key={index} className="text-gray-700 dark:text-gray-300 leading-relaxed">
+                    - {item}
+                  </li>
+                ))
+              ) : (
+                <li className="text-gray-500 dark:text-gray-400">- Not enough context yet.</li>
+              )}
+            </ul>
+          )}
+        </div>
+      ))}
+
+      {!answer.direct_answer && markdown ? (
+        <ReactMarkdown className="prose prose-sm dark:prose-invert max-w-none">
+          {markdown}
+        </ReactMarkdown>
+      ) : null}
     </div>
   )
 }

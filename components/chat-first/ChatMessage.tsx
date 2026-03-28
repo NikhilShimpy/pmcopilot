@@ -30,6 +30,7 @@ import {
   Map,
   Users,
   Package,
+  IndianRupee,
   Calendar,
   TrendingUp,
   RefreshCw,
@@ -47,7 +48,7 @@ const sectionIcons: Record<string, React.ElementType> = {
   'execution-roadmap': Map,
   'manpower-planning': Users,
   'resources': Package,
-  'cost-estimation': () => <span className="text-sm font-bold">₹</span>,
+  'cost-estimation': IndianRupee,
   'timeline': Calendar,
   'impact-analysis': TrendingUp,
 }

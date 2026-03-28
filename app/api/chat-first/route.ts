@@ -149,16 +149,31 @@ function formatStructuredAnswerMarkdown(answer: StructuredAnswer): string {
   ].join('\n');
 }
 
-function chunkForStreaming(text: string, wordsPerChunk: number): string[] {
-  const words = text.split(/\s+/).filter(Boolean);
-  if (words.length === 0) {
+function chunkForStreaming(text: string, chunkSize = 220): string[] {
+  const normalized = text || '';
+  if (!normalized.trim()) {
     return [];
   }
 
   const chunks: string[] = [];
-  for (let index = 0; index < words.length; index += wordsPerChunk) {
-    chunks.push(`${words.slice(index, index + wordsPerChunk).join(' ')} `);
+  let cursor = 0;
+
+  while (cursor < normalized.length) {
+    let next = Math.min(normalized.length, cursor + chunkSize);
+
+    if (next < normalized.length) {
+      const newline = normalized.lastIndexOf('\n', next);
+      const space = normalized.lastIndexOf(' ', next);
+      const boundary = Math.max(newline, space);
+      if (boundary > cursor + 60) {
+        next = boundary + 1;
+      }
+    }
+
+    chunks.push(normalized.slice(cursor, next));
+    cursor = next;
   }
+
   return chunks;
 }
 
@@ -260,14 +275,18 @@ export async function POST(request: NextRequest) {
     const formattedMarkdown = formatStructuredAnswerMarkdown(structured);
 
     const encoder = new TextEncoder();
-    const chunks = chunkForStreaming(formattedMarkdown, 6);
+    const chunks = chunkForStreaming(formattedMarkdown, 220);
     const stream = new ReadableStream({
       async start(controller) {
+        const totalChunks = Math.max(chunks.length, 1);
+
         for (let index = 0; index < chunks.length; index++) {
+          const isFinalChunk = index === chunks.length - 1;
           const payload = JSON.stringify({
             content: chunks[index],
             provider: 'gemini',
-            progress: Math.round(((index + 1) / chunks.length) * 100),
+            progress: Math.round(((index + 1) / totalChunks) * 100),
+            ...(isFinalChunk ? { structured } : {}),
           });
           controller.enqueue(encoder.encode(`data: ${payload}\n\n`));
           if (index < chunks.length - 1) {
@@ -315,7 +334,7 @@ export async function GET() {
       endpoint: '/api/chat-first',
       provider: 'gemini',
       mode: 'free-tier-only',
-      format: 'structured-markdown',
+      format: 'structured-json-with-markdown-stream',
     }),
     { status: 200, headers: { 'Content-Type': 'application/json' } }
   );
