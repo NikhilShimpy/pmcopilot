@@ -20,6 +20,90 @@ export type StrategySectionId =
   | 'timeline'
   | 'impact-analysis';
 
+export interface CostIntakeSelections {
+  market_business?: {
+    target_market_size?: string;
+    audience_type?: string;
+    monetization_model?: string;
+    competition_level?: string;
+    launch_geography?: string;
+  };
+  user_scale?: {
+    expected_users?: string;
+    concurrent_users?: string;
+    growth_expectation?: string;
+    user_roles?: string;
+    retention_needs?: string;
+  };
+  feature_complexity?: {
+    basic_features?: string;
+    advanced_features?: string;
+    ai_features?: string;
+    realtime_features?: string;
+    integrations_complexity?: string;
+    automation_level?: string;
+  };
+  technical_complexity?: {
+    frontend_complexity?: string;
+    backend_complexity?: string;
+    database_complexity?: string;
+    ai_ml_level?: string;
+    security_level?: string;
+  };
+  infrastructure_hosting?: {
+    cloud_preference?: string;
+    hosting_scale?: string;
+    storage_bandwidth?: string;
+    cdn_autoscaling?: string;
+  };
+  integrations_apis?: {
+    payment?: string;
+    maps_location?: string;
+    communication?: string;
+    ai_apis?: string;
+    social_login?: string;
+    domain_integrations?: string;
+  };
+  design_ux?: {
+    design_quality?: string;
+    animations?: string;
+    accessibility?: string;
+    responsiveness?: string;
+  };
+  security_compliance?: {
+    auth_level?: string;
+    encryption?: string;
+    compliance?: string;
+    backup_disaster_recovery?: string;
+  };
+  development_factors?: {
+    team_mode?: string;
+    seniority?: string;
+    delivery_speed?: string;
+    stack_preference?: string;
+  };
+  maintenance_scaling?: {
+    bug_fixing?: string;
+    update_frequency?: string;
+    support_level?: string;
+    scaling_plan?: string;
+    monitoring_logging?: string;
+  };
+  performance_requirements?: {
+    page_speed?: string;
+    realtime_response?: string;
+    uptime_sla?: string;
+    optimization_level?: string;
+  };
+  business_model_impact?: {
+    business_model?: string;
+  };
+  product_type?: {
+    product_type?: string;
+  };
+  notes?: string;
+}
+
 export interface ExecutiveDashboard {
   idea_expansion: string;
   key_insight: string;
@@ -27,12 +111,17 @@ export interface ExecutiveDashboard {
   market_opportunity: string;
   complexity_level: 'Low' | 'Medium' | 'High' | 'Very High';
   recommended_strategy: string;
+  idea_expansion_breakdown?: string[];
+  market_opportunity_signals?: string[];
+  recommended_strategy_actions?: string[];
+  score_rationale?: string;
 }
 
 export interface StrategicProblem {
   id: string;
   title: string;
   deep_description: string;
+  detailed_description?: string;
   description?: string;
   root_cause?: string;
   affected_users?: string;
@@ -53,11 +142,12 @@ export interface StrategicFeature {
   id: string;
   name: string;
   title?: string;
-  category: 'core' | 'advanced' | 'futuristic' | string;
+  category: 'core' | 'advanced' | 'optional' | 'futuristic' | string;
   detailed_description: string;
   description?: string;
   why_needed?: string;
   linked_problems?: string[];
+  mapped_problem_ids?: string[];
   user_value?: string;
   business_value?: string;
   implementation_strategy?: string[];
@@ -323,6 +413,24 @@ export interface ManpowerPlan {
   hiring_plan?: string;
   total_monthly_cost_inr?: number;
   total_team_size?: number;
+  roles_rationale?: Array<{
+    role: string;
+    why_needed: string;
+    must_have?: boolean;
+    hiring_phase?: string;
+  }>;
+  hiring_phases?: Array<{
+    phase: string;
+    timeline: string;
+    roles: string[];
+    notes?: string;
+  }>;
+  team_options?: {
+    lean_team?: TeamCost[];
+    startup_team?: TeamCost[];
+    scale_team?: TeamCost[];
+  };
+  assumptions?: string[];
 }
 
 export interface ResourceItem {
@@ -429,6 +537,25 @@ export interface CostPlan {
   startup_version?: BudgetVersion;
   scale_version?: BudgetVersion;
   total_first_year?: number;
+  assumptions?: string[];
+  cost_drivers?: Array<{
+    driver: string;
+    selected_option?: string;
+    impact_level?: 'Low' | 'Medium' | 'High' | string;
+    notes?: string;
+  }>;
+  budget_ranges?: {
+    currency?: string;
+    mvp?: { min: number; max: number };
+    startup?: { min: number; max: number };
+    scale?: { min: number; max: number };
+  };
+  team_implications?: string[];
+  infra_implications?: string[];
+  maintenance_implications?: string[];
+  confidence_level?: 'Low' | 'Medium' | 'High' | string;
+  uncertainty_notes?: string[];
+  break_even_months?: number;
 }
 
 export interface FeatureTimeEstimate {
@@ -452,6 +579,20 @@ export interface TimePlan {
   total_weeks?: number;
   milestones?: TimeMilestone[];
   critical_path?: string[];
+  phases?: Array<{
+    phase_name: string;
+    duration: string;
+    goals: string[];
+    deliverables: string[];
+    dependencies: string[];
+    risks: string[];
+    staffing_assumptions: string[];
+  }>;
+  mvp_vs_post_mvp?: {
+    mvp_focus?: string[];
+    post_mvp_focus?: string[];
+  };
+  assumptions?: string[];
 }
 
 export interface ImpactAnalysis {
@@ -484,7 +625,9 @@ export interface AnalysisMetadata {
   generated_sections?: StrategySectionId[];
   section_providers?: Partial<Record<StrategySectionId, string>>;
   source_input?: string;
+  project_name?: string;
   project_context?: string;
+  cost_intake?: CostIntakeSelections;
   detail_level?: string;
   saved_analysis_id?: string;
   [key: string]: unknown;
