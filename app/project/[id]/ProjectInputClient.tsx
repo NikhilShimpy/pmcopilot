@@ -297,7 +297,7 @@ export default function ProjectInputClient({ project: initialProject, user }: Pr
             </h2>
             <p className="text-lg text-gray-500 dark:text-gray-400 max-w-xl mx-auto">
               Describe your product idea, paste customer feedback, or upload documents.
-              AI will generate a comprehensive PRD and analysis.
+              AI will generate the All Sections overview first, then each section on demand.
             </p>
           </motion.div>
 

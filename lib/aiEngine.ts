@@ -2,14 +2,13 @@
  * PMCopilot - Core AI Analysis Engine v3.0
  *
  * PRODUCTION-READY AI PIPELINE
- * PRIMARY: Google Gemini API
- * FALLBACK: Groq (ONLY if Gemini fails)
+ * PROVIDER: Google Gemini API (free-tier only)
  *
  * REMOVED: Ollama, HuggingFace, OpenRouter
  */
 
 import axios from 'axios';
-import { config } from './config';
+import { assertGeminiFreeTierConfig, config, FREE_TIER_MODELS } from './config';
 import { logger } from './logger';
 import { AI_CONFIG } from '@/utils/constants';
 import { retry, sleep } from '@/utils/helpers';
@@ -97,14 +96,21 @@ function isRateLimited(provider: 'gemini' | 'groq' | 'claude'): boolean {
   return new Date() < state.backoffUntil;
 }
 
-function recordRateLimitError(provider: 'gemini' | 'groq' | 'claude') {
+function recordRateLimitError(
+  provider: 'gemini' | 'groq' | 'claude',
+  customBackoffSeconds?: number,
+  reason: 'rate_limit' | 'spending_cap' = 'rate_limit'
+) {
   const state = rateLimitState[provider];
   state.lastError = new Date();
   state.consecutiveErrors++;
   // Exponential backoff: 30s, 60s, 120s, 240s, max 5min
-  const backoffSeconds = Math.min(30 * Math.pow(2, state.consecutiveErrors - 1), 300);
+  const backoffSeconds =
+    customBackoffSeconds ??
+    Math.min(30 * Math.pow(2, state.consecutiveErrors - 1), 300);
   state.backoffUntil = new Date(Date.now() + backoffSeconds * 1000);
   logger.warn(`Rate limit recorded for ${provider}`, {
+    reason,
     consecutiveErrors: state.consecutiveErrors,
     backoffUntil: state.backoffUntil.toISOString(),
     backoffSeconds,
@@ -215,7 +221,7 @@ function classifyGeminiError(error: any): GeminiErrorClassification {
       type: 'config_error',
       shouldFallback: false,
       shouldRetry: false,
-      message: `Model not found: ${AI_CONFIG.GEMINI.DEFAULT_MODEL}. Check available models at https://ai.google.dev/models`,
+      message: `Model not found: ${config.gemini.model}. Free-tier allowed models: ${FREE_TIER_MODELS.join(', ')}`,
     };
   }
 
@@ -231,7 +237,7 @@ function classifyGeminiError(error: any): GeminiErrorClassification {
         type: 'config_error', // Treat as config issue, not transient
         shouldFallback: true,
         shouldRetry: false,
-        message: 'Spending cap exceeded - increase your Google Cloud billing limit at https://console.cloud.google.com/billing',
+        message: 'Gemini free-tier quota/cap exceeded. Retry later or reduce token usage.',
       };
     }
     
@@ -305,7 +311,8 @@ async function callGemini(
     throw new Error(`Gemini rate-limited until ${state.backoffUntil?.toISOString()}`);
   }
 
-  const model = AI_CONFIG.GEMINI.DEFAULT_MODEL;
+  assertGeminiFreeTierConfig();
+  const model = config.gemini.model;
   const url = `${AI_CONFIG.GEMINI.BASE_URL}/${model}:generateContent?key=${config.gemini.apiKey}`;
 
   logger.ai('Calling Gemini API (PRIMARY)', 'gemini', {
@@ -327,7 +334,7 @@ async function callGemini(
 
     const generationConfig: any = {
       temperature,
-      maxOutputTokens: Math.min(max_tokens * 4, 32768), // Gemini 2.5 supports up to 65536, use 32768 for safety
+      maxOutputTokens: Math.min(max_tokens, 4096),
     };
 
     // Only add JSON mode for analysis, not for chat
@@ -374,15 +381,17 @@ async function callGemini(
     });
 
     // Detailed token usage logging for monitoring output truncation
+    const outputTokens = response.data.usageMetadata?.candidatesTokenCount;
+
     logger.info('📊 Gemini token usage details', {
       inputTokens: response.data.usageMetadata?.promptTokenCount ?? 'unknown',
-      outputTokens: response.data.usageMetadata?.candidatesTokenCount ?? 'unknown',
+      outputTokens: outputTokens ?? 'unknown',
       totalTokens: response.data.usageMetadata?.totalTokenCount ?? 'unknown',
       maxOutputTokens: generationConfig.maxOutputTokens,
-      outputUtilization: response.data.usageMetadata?.candidatesTokenCount 
-        ? `${Math.round((response.data.usageMetadata.candidatesTokenCount / generationConfig.maxOutputTokens) * 100)}%`
+      outputUtilization: outputTokens !== undefined
+        ? `${Math.round((outputTokens / generationConfig.maxOutputTokens) * 100)}%`
         : 'unknown',
-      truncated: response.data.usageMetadata?.candidatesTokenCount >= generationConfig.maxOutputTokens ? '⚠️ YES' : 'no',
+      truncated: outputTokens !== undefined && outputTokens >= generationConfig.maxOutputTokens ? '⚠️ YES' : 'no',
     });
 
     return content;
@@ -403,16 +412,24 @@ async function callGemini(
         classificationMessage: classification.message,
       });
 
-      // Only track rate limit for actual rate limit errors (429)
-      if (classification.type === 'rate_limit') {
-        recordRateLimitError('gemini');
+      // Spending-cap exhaustion should skip Gemini for longer and fall back.
+      if (
+        classification.type === 'rate_limit' ||
+        (classification.type === 'config_error' && classification.shouldFallback)
+      ) {
+        const isSpendingCap = classification.message.includes('Spending cap exceeded');
+        recordRateLimitError(
+          'gemini',
+          isSpendingCap ? 1800 : undefined,
+          isSpendingCap ? 'spending_cap' : 'rate_limit'
+        );
       }
       
-      // For config errors, throw a special error that prevents fallback
+      // For config errors, preserve whether fallback is allowed.
       if (classification.type === 'config_error') {
         const configError = new Error(`GEMINI_CONFIG_ERROR: ${classification.message}`);
         (configError as any).isConfigError = true;
-        (configError as any).shouldFallback = false;
+        (configError as any).shouldFallback = classification.shouldFallback;
         throw configError;
       }
     } else if (error.code === 'ECONNABORTED') {
@@ -681,7 +698,7 @@ async function callClaude(
 }
 
 // ============================================
-// AI CALL WITH FALLBACK (GEMINI -> GROQ -> CLAUDE)
+// AI CALL (GEMINI FREE-TIER ONLY)
 // ============================================
 
 export async function callAI(
@@ -695,10 +712,53 @@ export async function callAI(
   } = {}
 ): Promise<{ content: string; provider: 'gemini' | 'groq' | 'claude' }> {
   const { retries = AI_CONFIG.MAX_RETRIES, jsonMode = true, ...callOptions } = options;
+  assertGeminiFreeTierConfig();
 
   let lastGeminiError: Error | null = null;
   let lastGroqError: Error | null = null;
   let lastClaudeError: Error | null = null;
+
+  logger.info('Starting AI call in Gemini free-tier-only mode', {
+    retries,
+    maxTokens: callOptions.max_tokens,
+    geminiModel: config.gemini.model,
+  });
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      logger.info(`Gemini attempt ${attempt + 1}/${retries + 1}`);
+      const content = await callGemini(messages, { ...callOptions, jsonMode });
+      return { content, provider: 'gemini' };
+    } catch (error: any) {
+      lastGeminiError = error as Error;
+
+      if (error?.isConfigError === true) {
+        throw error;
+      }
+
+      const canRetry = attempt < retries && !isRateLimited('gemini');
+      logger.warn('Gemini attempt failed', {
+        attempt: attempt + 1,
+        retries,
+        error: lastGeminiError?.message || 'unknown error',
+        canRetry,
+      });
+
+      if (!canRetry) {
+        const finalMessage =
+          `Gemini free-tier request failed: ${lastGeminiError?.message || 'unknown error'}. ` +
+          'No paid fallback providers are enabled in this app.';
+        throw new Error(finalMessage);
+      }
+
+      const backoffMs = 1000 * Math.pow(2, attempt);
+      await sleep(backoffMs);
+    }
+  }
+
+  throw new Error(
+    `Gemini free-tier request failed: ${lastGeminiError?.message || 'unknown error'}. No paid fallback providers are enabled in this app.`
+  );
 
   // Check if providers are available (not in backoff)
   const geminiAvailable = !isRateLimited('gemini');
@@ -711,7 +771,7 @@ export async function callAI(
     claudeAvailable,
     retries,
     maxTokens: callOptions.max_tokens,
-    geminiModel: AI_CONFIG.GEMINI.DEFAULT_MODEL,
+    geminiModel: config.gemini.model,
   });
 
   // PRIMARY: Try Gemini with retries (if not rate-limited)
@@ -725,18 +785,26 @@ export async function callAI(
       } catch (error: any) {
         lastGeminiError = error as Error;
         
-        // CHECK FOR CONFIG ERRORS - DO NOT FALLBACK, FAIL IMMEDIATELY
-        if (error.isConfigError === true) {
+        // Hard config errors should fail immediately, but quota/billing issues
+        // are allowed to fall through to backup providers.
+        if (error.isConfigError === true && error.shouldFallback !== true) {
           logger.error('🚫 GEMINI CONFIG ERROR - NOT FALLING BACK', {
             error: error.message,
-            model: AI_CONFIG.GEMINI.DEFAULT_MODEL,
+            model: config.gemini.model,
             hint: 'Fix the Gemini configuration. This is not a transient error.',
           });
           throw error; // Propagate immediately, do not try other providers
         }
+
+        if (error.isConfigError === true && error.shouldFallback === true) {
+          logger.warn('Gemini unavailable, continuing to fallback providers', {
+            error: error.message,
+            model: config.gemini.model,
+          });
+        }
         
         logger.warn(`⚠️ Gemini attempt ${attempt + 1} failed`, {
-          error: lastGeminiError.message,
+          error: lastGeminiError?.message || 'unknown error',
           willRetry: attempt < retries && !isRateLimited('gemini'),
         });
 
@@ -772,7 +840,7 @@ export async function callAI(
       } catch (error) {
         lastGroqError = error as Error;
         logger.warn(`⚠️ Groq attempt ${attempt + 1} failed`, {
-          error: lastGroqError.message,
+          error: lastGroqError?.message || 'unknown error',
         });
 
         if (isRateLimited('groq')) {
@@ -806,7 +874,7 @@ export async function callAI(
       } catch (error) {
         lastClaudeError = error as Error;
         logger.warn(`⚠️ Claude attempt ${attempt + 1} failed`, {
-          error: lastClaudeError.message,
+          error: lastClaudeError?.message || 'unknown error',
         });
 
         if (isRateLimited('claude')) {
@@ -839,9 +907,11 @@ export async function callAI(
     claudeRateLimited: isRateLimited('claude'),
   });
 
-  throw new Error(
+  const aggregateError = new Error(
     `All AI providers failed. Gemini: ${lastGeminiError?.message || 'rate-limited'}. Groq: ${lastGroqError?.message || 'rate-limited'}. Claude: ${lastClaudeError?.message || 'rate-limited/not-configured'}`
   );
+  (aggregateError as any).shouldFallback = true;
+  throw aggregateError;
 }
 
 // ============================================
@@ -1445,7 +1515,7 @@ export async function runAnalysisPipeline(
       analysis_id: analysisId,
       created_at: new Date().toISOString(),
       processing_time_ms: processingTime,
-      model_used: AI_CONFIG.GEMINI.DEFAULT_MODEL,
+      model_used: config.gemini.model,
       total_feedback_items: cleanedFeedback.length,
 
       // Core Results

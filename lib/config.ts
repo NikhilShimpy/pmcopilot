@@ -2,17 +2,15 @@ import { EnvironmentConfig } from '@/types';
 import { AI_CONFIG } from '@/utils/constants';
 
 /**
- * SUPPORTED GEMINI MODELS
- * These are the stable models available via v1beta API
- * Updated 2026 - Current production models
+ * Free-tier Gemini models that this app is allowed to use.
+ * Any other model is treated as invalid configuration.
  */
-const SUPPORTED_GEMINI_MODELS = [
-  'gemini-2.5-flash',        // Stable 2.5 (primary)
-  'gemini-2.5-flash-lite',   // Stable 2.5 lite (budget)
-  'gemini-2.5-pro',          // Stable 2.5 pro (advanced)
-  'gemini-3-flash',          // Preview 3.x
-  'gemini-3.1-pro',          // Preview 3.x
-];
+const FREE_TIER_GEMINI_MODELS = [
+  'gemini-2.5-flash-lite',
+  'gemini-2.5-flash',
+] as const;
+
+const DEFAULT_FREE_TIER_MODEL = 'gemini-2.5-flash-lite';
 
 /**
  * Validates that required environment variables are present
@@ -44,15 +42,84 @@ function getEnv(
   return value || defaultValue || '';
 }
 
+function getGeminiApiKeys(): string[] {
+  const keys = new Set<string>();
+  const primaryKey = process.env.GEMINI_API_KEY?.trim();
+  const pooledKeys =
+    process.env.GEMINI_API_KEYS
+      ?.split(',')
+      .map((key) => key.trim())
+      .filter(Boolean) || [];
+
+  if (primaryKey) {
+    keys.add(primaryKey);
+  }
+
+  for (const key of pooledKeys) {
+    keys.add(key);
+  }
+
+  for (let index = 1; index <= 10; index++) {
+    const numberedKey = process.env[`GEMINI_API_KEY_${index}`]?.trim();
+    if (numberedKey) {
+      keys.add(numberedKey);
+    }
+  }
+
+  return Array.from(keys);
+}
+
+function resolveGeminiModel(): string {
+  return (
+    process.env.GEMINI_MODEL?.trim() ||
+    AI_CONFIG.GEMINI.DEFAULT_MODEL ||
+    DEFAULT_FREE_TIER_MODEL
+  );
+}
+
+type GeminiModelValidation = {
+  valid: boolean;
+  model: string;
+  message: string;
+};
+
+export function validateGeminiModel(
+  model: string = resolveGeminiModel()
+): GeminiModelValidation {
+  if (!model) {
+    return {
+      valid: false,
+      model: '',
+      message: `No Gemini model configured. Set GEMINI_MODEL to one of: ${FREE_TIER_GEMINI_MODELS.join(
+        ', '
+      )}.`,
+    };
+  }
+
+  const normalized = model.trim();
+  const isKnownFreeTierModel = FREE_TIER_GEMINI_MODELS.some(
+    (allowed) => normalized === allowed || normalized.startsWith(`${allowed}-`)
+  );
+
+  if (!isKnownFreeTierModel) {
+    return {
+      valid: false,
+      model: normalized,
+      message: `Invalid GEMINI_MODEL "${normalized}" for free-tier-only mode. Allowed: ${FREE_TIER_GEMINI_MODELS.join(
+        ', '
+      )}.`,
+    };
+  }
+
+  return {
+    valid: true,
+    model: normalized,
+    message: `Gemini free-tier model "${normalized}" is valid.`,
+  };
+}
+
 /**
  * Environment configuration object
- *
- * AI PROVIDERS:
- * - PRIMARY: Google Gemini API
- * - FALLBACK: Groq 
- * - FALLBACK 2: Claude (Anthropic)
- *
- * REMOVED: Ollama, HuggingFace, OpenRouter
  */
 export const config: EnvironmentConfig = {
   supabase: {
@@ -60,16 +127,22 @@ export const config: EnvironmentConfig = {
     anonKey: getEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY'),
   },
   gemini: {
-    apiKey: getEnv('GEMINI_API_KEY'),
+    apiKey: validateEnv('GEMINI_API_KEY / GEMINI_API_KEYS', getGeminiApiKeys()[0]),
+    apiKeys: getGeminiApiKeys(),
+    model: resolveGeminiModel(),
+    freeTierOnly: true,
   },
   groq: {
-    apiKey: getEnv('GROQ_API_KEY'),
+    apiKey: getEnv('GROQ_API_KEY', '', false),
   },
   claude: {
-    apiKey: getEnv('CLAUDE_API_KEY', '', false), // Optional - if available
+    apiKey: getEnv('CLAUDE_API_KEY', '', false),
   },
   app: {
-    env: (getEnv('NODE_ENV', 'development', false) as 'development' | 'production' | 'test'),
+    env: getEnv('NODE_ENV', 'development', false) as
+      | 'development'
+      | 'production'
+      | 'test',
   },
 };
 
@@ -88,35 +161,11 @@ export const isDevelopment = config.app.env === 'development';
  */
 export const isTest = config.app.env === 'test';
 
-/**
- * Validates Gemini model configuration
- */
-function validateGeminiModel(): { valid: boolean; model: string; message: string } {
-  const configuredModel = AI_CONFIG.GEMINI.DEFAULT_MODEL;
-  
-  if (!configuredModel) {
-    return {
-      valid: false,
-      model: '',
-      message: 'No Gemini model configured in AI_CONFIG.GEMINI.DEFAULT_MODEL',
-    };
+export function assertGeminiFreeTierConfig(): void {
+  const validation = validateGeminiModel(config.gemini.model);
+  if (!validation.valid) {
+    throw new Error(validation.message);
   }
-  
-  const isKnownModel = SUPPORTED_GEMINI_MODELS.some(m => configuredModel.startsWith(m));
-  
-  if (!isKnownModel) {
-    return {
-      valid: false,
-      model: configuredModel,
-      message: `Unknown Gemini model: "${configuredModel}". Supported models: ${SUPPORTED_GEMINI_MODELS.join(', ')}`,
-    };
-  }
-  
-  return {
-    valid: true,
-    model: configuredModel,
-    message: `Gemini model "${configuredModel}" is valid`,
-  };
 }
 
 /**
@@ -124,26 +173,19 @@ function validateGeminiModel(): { valid: boolean; model: string; message: string
  */
 export function validateEnvironment(): void {
   try {
-    // Try to access config to trigger validation
+    // Trigger required env checks
     const requiredKeys = [
       config.supabase.url,
       config.supabase.anonKey,
       config.gemini.apiKey,
-      config.groq.apiKey,
     ];
+    void requiredKeys;
 
-    console.log('[Config] Environment variables validated successfully ✓');
-    
-    // Validate Gemini model
-    const geminiValidation = validateGeminiModel();
-    if (geminiValidation.valid) {
-      console.log(`[Config] ✅ Gemini configured with model: ${geminiValidation.model}`);
-    } else {
-      console.error(`[Config] ⚠️ GEMINI MODEL WARNING: ${geminiValidation.message}`);
-    }
-    
-    const claudeStatus = config.claude.apiKey ? '✓' : '(optional)';
-    console.log(`[Config] AI Providers: Gemini (PRIMARY) → Groq (FALLBACK) → Claude ${claudeStatus}`);
+    assertGeminiFreeTierConfig();
+
+    console.log('[Config] Environment variables validated successfully');
+    console.log(`[Config] Gemini model: ${config.gemini.model} (free-tier only)`);
+    console.log('[Config] Provider mode: Gemini only (no paid fallback)');
   } catch (error) {
     console.error('[Config] Environment validation failed:', error);
     throw error;
@@ -169,14 +211,11 @@ export function getAppConfig() {
   return config.app;
 }
 
-// Auto-validate on import (only in Node.js environment, not during build)
-if (typeof window === 'undefined' && process.env.NODE_ENV !== 'production') {
-  try {
-    validateEnvironment();
-  } catch (error) {
-    // Don't throw during build time, only log
-    console.warn('[Config] Skipping validation during build');
-  }
+// Auto-validate on import (server only)
+if (typeof window === 'undefined') {
+  validateEnvironment();
 }
+
+export const FREE_TIER_MODELS = FREE_TIER_GEMINI_MODELS;
 
 export default config;

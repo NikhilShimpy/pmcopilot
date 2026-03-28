@@ -3,9 +3,8 @@
  *
  * POST /api/chat - Stream AI responses with context awareness
  *
- * AI PROVIDERS:
- * - PRIMARY: Google Gemini API
- * - FALLBACK: Groq (ONLY if Gemini fails)
+ * AI PROVIDER:
+ * - Google Gemini (free-tier only)
  */
 
 import { NextRequest } from 'next/server'
@@ -509,7 +508,7 @@ export async function GET(request: NextRequest) {
       endpoint: '/api/chat',
       methods: ['POST'],
       version: '3.0',
-      providers: ['gemini (primary)', 'groq (fallback)']
+      providers: ['gemini (free-tier only)']
     }),
     { status: 200, headers: { 'Content-Type': 'application/json' } }
   )

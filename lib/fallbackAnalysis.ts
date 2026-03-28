@@ -876,6 +876,43 @@ The timing is optimal given current market trends toward digital transformation 
       total_first_year: 17000000
     },
 
+    cost_planning: {
+      development_phase_cost_inr: {
+        mvp: 1500000,
+        growth: 2500000,
+        scale: 1350000,
+      },
+      operational_costs_monthly_inr: {
+        team: 695000,
+        infrastructure: 45000,
+        marketing: 150000,
+        others: 60000,
+      },
+      total_first_year_cost_inr: 17000000,
+      break_even_analysis: "Break-even is achievable in 18-24 months with disciplined burn control, phased hiring, and a pricing model that reaches stable recurring revenue before aggressive expansion.",
+      funding_requirements: "A seed raise in the INR 1.5Cr-3Cr range would support MVP delivery, initial go-to-market, and a 12-18 month runway to validate product-market fit.",
+      budget_scenarios: {
+        lean_startup: {
+          total_cost_inr: 4000000,
+          runway_months: 12,
+          team_size: 3,
+          description: "Founder-led lean build with a very small team, constrained scope, and minimal paid tooling.",
+        },
+        standard_startup: {
+          total_cost_inr: 17000000,
+          runway_months: 18,
+          team_size: 5,
+          description: "Balanced startup plan with a dedicated product team, reliable infrastructure, and moderate growth spend.",
+        },
+        well_funded: {
+          total_cost_inr: 35000000,
+          runway_months: 24,
+          team_size: 10,
+          description: "Aggressive execution path with faster hiring, broader feature development, and enterprise readiness work.",
+        },
+      },
+    },
+
     time_estimation: {
       mvp_timeline: "10 weeks from start to beta launch",
       full_product_timeline: "34 weeks total (10 weeks MVP + 24 weeks growth features)",

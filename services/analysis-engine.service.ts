@@ -171,6 +171,46 @@ export class AnalysisEngineService {
     }
   }
 
+  async updateAnalysisResult(
+    supabase: SupabaseClient,
+    analysisId: string,
+    projectId: string,
+    result: any
+  ): Promise<boolean> {
+    logger.info('Updating analysis result', {
+      analysisId,
+      projectId,
+    });
+
+    try {
+      const { error } = await supabase
+        .from(DB_TABLES.ANALYSES)
+        .update({
+          result,
+        })
+        .eq('id', analysisId)
+        .eq('project_id', projectId);
+
+      if (error) {
+        logger.error('Failed to update analysis result', {
+          analysisId,
+          projectId,
+          error: error.message,
+        });
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      logger.error('Database error while updating analysis', {
+        analysisId,
+        projectId,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+      return false;
+    }
+  }
+
   /**
    * Get analysis by ID
    */

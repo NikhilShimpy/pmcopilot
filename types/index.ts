@@ -173,6 +173,9 @@ export interface EnvironmentConfig {
   };
   gemini: {
     apiKey: string;
+    apiKeys: string[];
+    model: string;
+    freeTierOnly: boolean;
   };
   groq: {
     apiKey: string;
