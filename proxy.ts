@@ -3,9 +3,9 @@ import { NextResponse, type NextRequest } from 'next/server'
 
 /**
  * Proxy for route protection and session management
- * Protects /dashboard routes and refreshes auth tokens
+ * Protects /dashboard and /project routes and refreshes auth tokens
  *
- * Next.js 16+: Renamed from middleware to proxy
+ * Next.js 16+: Uses "proxy" instead of "middleware"
  */
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({
@@ -88,7 +88,7 @@ export async function proxy(request: NextRequest) {
   return response
 }
 
-// Updated matcher config for Next.js 16+
+// Matcher config for Next.js 16+
 export const config = {
   matcher: [
     // Match all paths except static files and images

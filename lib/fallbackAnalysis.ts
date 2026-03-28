@@ -1,7 +1,9 @@
 /**
- * Fallback Analysis System v3.0
+ * Fallback Analysis System v4.0
  *
  * Generates comprehensive analysis when all AI APIs fail
+ * NOW MORE INPUT-AWARE: Extracts keywords, intent, and context from user input
+ * 
  * Ensures minimum output requirements are met:
  * - MINIMUM 10 Problems
  * - MINIMUM 15 Features
@@ -9,47 +11,181 @@
  */
 
 import { ComprehensiveStrategyResult } from '@/types/comprehensive-strategy'
+import { logger } from './logger'
+
+// ============================================
+// INPUT ANALYSIS HELPERS
+// ============================================
+
+interface ExtractedContext {
+  productType: string;
+  targetUsers: string;
+  primaryFeatures: string[];
+  industry: string;
+  keywords: string[];
+  isApp: boolean;
+  isSaaS: boolean;
+  isB2B: boolean;
+  isB2C: boolean;
+  hasAI: boolean;
+  hasMobile: boolean;
+}
+
+function extractContextFromInput(feedback: string): ExtractedContext {
+  const lowerFeedback = feedback.toLowerCase();
+  const words = feedback.split(/\s+/).filter(w => w.length > 2);
+  
+  // Extract meaningful keywords (excluding common words)
+  const stopWords = new Set(['the', 'and', 'for', 'that', 'this', 'with', 'from', 'have', 'has', 'are', 'was', 'were', 'been', 'being', 'will', 'would', 'could', 'should', 'can', 'may', 'might', 'must', 'shall', 'want', 'need', 'like', 'also', 'just', 'more', 'some', 'any', 'all', 'most', 'other', 'into', 'over', 'such', 'only', 'very', 'same', 'own', 'about', 'which', 'when', 'what', 'where', 'who', 'how', 'why', 'each', 'few', 'many', 'much', 'both', 'than']);
+  const keywords = [...new Set(words.filter(w => !stopWords.has(w.toLowerCase()) && w.length > 3))].slice(0, 30);
+
+  // Detect product type
+  const isApp = /\b(app|application|mobile)\b/i.test(feedback);
+  const isSaaS = /\b(saas|platform|software|service|subscription|cloud)\b/i.test(feedback);
+  const isB2B = /\b(b2b|business|enterprise|companies|wholesalers?|retailers?|vendors?|merchants?)\b/i.test(feedback);
+  const isB2C = /\b(b2c|consumers?|customers?|users?|people|individuals?)\b/i.test(feedback);
+  const hasAI = /\b(ai|artificial intelligence|machine learning|ml|gpt|llm|intelligent|smart|automated?|personalize)\b/i.test(feedback);
+  const hasMobile = /\b(mobile|ios|android|phone|smartphone)\b/i.test(feedback);
+
+  // Detect industry
+  let industry = 'Technology';
+  if (/\b(health|medical|clinic|hospital|patient|doctor|wellness|fitness)\b/i.test(feedback)) industry = 'Healthcare';
+  else if (/\b(finance|banking|payment|fintech|invest|trading|loan|credit)\b/i.test(feedback)) industry = 'Finance';
+  else if (/\b(retail|commerce|shop|store|buy|sell|inventory|order)\b/i.test(feedback)) industry = 'Retail & E-commerce';
+  else if (/\b(food|delivery|restaurant|meal|dining|recipe|grocery)\b/i.test(feedback)) industry = 'Food & Beverage';
+  else if (/\b(education|learning|course|student|teacher|school|training)\b/i.test(feedback)) industry = 'Education';
+  else if (/\b(travel|booking|hotel|flight|tourism|vacation)\b/i.test(feedback)) industry = 'Travel & Hospitality';
+  else if (/\b(real estate|property|home|apartment|rent|buy)\b/i.test(feedback)) industry = 'Real Estate';
+  else if (/\b(textile|fabric|clothing|fashion|apparel|garment)\b/i.test(feedback)) industry = 'Textile & Fashion';
+  else if (/\b(logistics|shipping|transport|fleet|warehouse|supply chain)\b/i.test(feedback)) industry = 'Logistics';
+
+  // Detect target users
+  let targetUsers = 'General users';
+  if (isB2B) targetUsers = 'Businesses and organizations';
+  if (/\b(wholesalers?|distributors?)\b/i.test(feedback)) targetUsers = 'Wholesalers and distributors';
+  if (/\b(retailers?|shop owners?|merchants?)\b/i.test(feedback)) targetUsers = 'Retailers and shop owners';
+  if (/\b(professionals?|workers?|employees?)\b/i.test(feedback)) targetUsers = 'Working professionals';
+  if (/\b(students?)\b/i.test(feedback)) targetUsers = 'Students';
+  if (/\b(fitness|gym|workout)\b/i.test(feedback)) targetUsers = 'Fitness enthusiasts';
+
+  // Detect product type name
+  let productType = 'digital product';
+  if (isApp && hasMobile) productType = 'mobile application';
+  else if (isSaaS) productType = 'SaaS platform';
+  else if (isApp) productType = 'application';
+  else if (/\b(website|web)\b/i.test(feedback)) productType = 'web platform';
+
+  // Extract features mentioned
+  const featurePatterns = [
+    /\b(track\w*|tracking)\b/gi,
+    /\b(manage\w*|management)\b/gi,
+    /\b(schedul\w*)\b/gi,
+    /\b(notif\w*|alert\w*)\b/gi,
+    /\b(analytic\w*|report\w*|dashboard)\b/gi,
+    /\b(automat\w*)\b/gi,
+    /\b(integrat\w*)\b/gi,
+    /\b(collaborat\w*|team\w*)\b/gi,
+    /\b(pay\w*|invoice\w*|billing)\b/gi,
+    /\b(inventory|stock)\b/gi,
+    /\b(order\w*)\b/gi,
+    /\b(chat|messag\w*|communic\w*)\b/gi,
+  ];
+  
+  const primaryFeatures: string[] = [];
+  featurePatterns.forEach(pattern => {
+    const matches = feedback.match(pattern);
+    if (matches) {
+      primaryFeatures.push(...matches.map(m => m.toLowerCase()));
+    }
+  });
+
+  return {
+    productType,
+    targetUsers,
+    primaryFeatures: [...new Set(primaryFeatures)].slice(0, 10),
+    industry,
+    keywords,
+    isApp,
+    isSaaS,
+    isB2B,
+    isB2C,
+    hasAI,
+    hasMobile,
+  };
+}
 
 export function generateFallbackAnalysis(feedback: string): ComprehensiveStrategyResult {
   const analysisId = `fallback-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`
 
-  // Extract key terms from feedback for contextual content
-  const words = feedback.toLowerCase().split(/\s+/).filter(w => w.length > 3)
-  const uniqueWords = [...new Set(words)].slice(0, 20)
-  const primaryTerm = uniqueWords[0] || 'product'
-  const secondaryTerm = uniqueWords[1] || 'solution'
+  // Extract rich context from input
+  const ctx = extractContextFromInput(feedback);
+  
+  logger.info('Generating fallback analysis with extracted context', {
+    analysisId,
+    inputLength: feedback.length,
+    extractedContext: {
+      productType: ctx.productType,
+      industry: ctx.industry,
+      targetUsers: ctx.targetUsers,
+      keywordCount: ctx.keywords.length,
+      featureCount: ctx.primaryFeatures.length,
+    }
+  });
+
+  // Create a summary from the input
+  const inputSummary = feedback.length > 200 ? feedback.substring(0, 200) + '...' : feedback;
+  const primaryKeyword = ctx.keywords[0] || 'product';
+  const secondaryKeyword = ctx.keywords[1] || 'solution';
+  
+  // Legacy variable names for compatibility with rest of fallback template
+  const primaryTerm = ctx.productType || primaryKeyword;
+  const secondaryTerm = ctx.industry || secondaryKeyword;
 
   return {
     metadata: {
       analysis_id: analysisId,
       created_at: new Date().toISOString(),
       processing_time_ms: 500,
-      model_used: 'PMCopilot Fallback Engine',
+      model_used: 'PMCopilot Fallback Engine v4.0',
       input_length: feedback.length,
-      fallback_mode: true
+      fallback_mode: true,
+      fallback_reason: 'All AI providers unavailable (rate limited or errored)',
+      extracted_context: ctx,
     },
 
     executive_dashboard: {
-      idea_expansion: `This ${primaryTerm} concept represents an innovative solution in the technology space. Based on the input provided, there are multiple market interpretations and opportunities for development. The core value proposition centers around solving key user pain points through modern technology implementation. The product addresses a significant market gap where existing solutions fail to meet user expectations for simplicity, reliability, and performance. With proper execution, this could capture significant market share in the growing ${primaryTerm} sector. The timing is optimal given current market trends toward digital transformation and user experience prioritization.`,
-      key_insight: `The primary opportunity lies in creating a ${primaryTerm}-focused solution that prioritizes user experience while maintaining enterprise-grade reliability. Current market alternatives are either too complex for average users or too limited for power users, creating a significant opportunity for a balanced approach.`,
-      innovation_score: 7,
-      market_opportunity: "The target market represents a significant opportunity with growing demand and limited quality competition. Early market entry with a superior product could establish lasting competitive advantage and brand recognition.",
-      complexity_level: "Medium",
-      recommended_strategy: "Focus on MVP development with core features first, establish product-market fit through early adopter feedback, then iterate rapidly based on validated learnings. Prioritize user experience and reliability over feature breadth."
+      idea_expansion: `Based on your input: "${inputSummary}"
+
+This ${ctx.productType} concept targets ${ctx.targetUsers} in the ${ctx.industry} sector. ${ctx.hasAI ? 'The AI-powered approach enables intelligent automation and personalization. ' : ''}${ctx.hasMobile ? 'Mobile-first design ensures accessibility on the go. ' : ''}${ctx.isB2B ? 'B2B focus allows for enterprise-grade features and scalability. ' : ''}
+
+Key opportunities identified:
+- Addressing ${ctx.primaryFeatures.length > 0 ? ctx.primaryFeatures.slice(0, 3).join(', ') : 'core functionality'} needs
+- Targeting underserved ${ctx.targetUsers} segment
+- Leveraging modern technology stack for competitive advantage
+- Building for scale from day one
+
+The timing is optimal given current market trends toward digital transformation and user experience prioritization in the ${ctx.industry} space.`,
+      
+      key_insight: `The primary opportunity lies in creating a ${ctx.productType} that prioritizes ${ctx.targetUsers}' needs while leveraging ${ctx.hasAI ? 'AI-powered automation' : 'modern technology'}. Current market alternatives in ${ctx.industry} are either too complex or too limited, creating a significant opportunity for a balanced, user-centric approach.`,
+      
+      innovation_score: ctx.hasAI ? 8 : 7,
+      market_opportunity: `The ${ctx.industry} sector shows strong growth with increasing demand for ${ctx.productType} solutions. ${ctx.isB2B ? 'Enterprise customers' : 'Consumer market'} represents significant TAM. Early entry with superior UX could establish lasting competitive advantage.`,
+      complexity_level: ctx.hasAI ? "High" : "Medium",
+      recommended_strategy: `Focus on MVP with core ${ctx.primaryFeatures.slice(0, 3).join(', ') || 'features'} first. Validate with ${ctx.targetUsers} through early adopter programs. Iterate rapidly based on feedback. ${ctx.isB2B ? 'Consider freemium model for user acquisition before enterprise sales.' : 'Build viral loops for organic growth.'}`
     },
 
     // ============================================
-    // PROBLEM ANALYSIS - MINIMUM 10 PROBLEMS
+    // PROBLEM ANALYSIS - MINIMUM 10 PROBLEMS (INPUT-AWARE)
     // ============================================
     problem_analysis: [
       {
         id: "PROB-001",
-        title: "User Experience Complexity",
-        deep_description: `Current ${primaryTerm} solutions suffer from overly complex user interfaces that create friction and reduce adoption rates. Users report spending excessive time learning basic features, leading to frustration and abandonment. The learning curve prevents both individual users and organizations from realizing the full value of existing solutions.`,
+        title: `${ctx.industry} User Experience Complexity`,
+        deep_description: `Current ${ctx.productType} solutions in ${ctx.industry} suffer from overly complex user interfaces that create friction for ${ctx.targetUsers}. Users report spending excessive time learning basic features, leading to frustration and abandonment. The learning curve prevents ${ctx.isB2B ? 'organizations' : 'users'} from realizing the full value of existing solutions.`,
         root_cause: "Lack of user-centered design approach in existing solutions. Products are built by engineers for engineers, ignoring the needs of typical users.",
-        affected_users: "Primary user segments including individual users, small business owners, and enterprise customers who need intuitive solutions",
-        current_solutions: "Existing products with limited usability, requiring extensive training",
-        gaps_in_market: "Simple, intuitive user experience that doesn't sacrifice functionality",
+        affected_users: ctx.targetUsers,
+        current_solutions: `Existing ${ctx.productType} products with limited usability, requiring extensive training`,
+        gaps_in_market: `Simple, intuitive ${ctx.productType} that doesn't sacrifice functionality`,
         why_existing_fails: "Focus on features over user experience, legacy architecture constraints",
         severity_score: 8,
         frequency_score: 9,
@@ -60,62 +196,62 @@ export function generateFallbackAnalysis(feedback: string): ComprehensiveStrateg
       {
         id: "PROB-002",
         title: "Limited Integration Capabilities",
-        deep_description: `Most ${primaryTerm} solutions operate in silos without proper integration with existing user workflows and tools. Users are forced to manually transfer data between systems, leading to inefficiency, errors, and frustration. This isolation prevents organizations from creating streamlined workflows.`,
-        root_cause: "Technical architecture limitations and closed ecosystem approach by vendors to maximize lock-in",
-        affected_users: "Business users requiring workflow integration across multiple tools and platforms",
+        deep_description: `Most ${ctx.productType} solutions in ${ctx.industry} operate in silos without proper integration with existing ${ctx.isB2B ? 'business' : 'user'} workflows and tools. ${ctx.targetUsers} are forced to manually transfer data between systems, leading to inefficiency, errors, and frustration.`,
+        root_cause: "Technical architecture limitations and closed ecosystem approach by vendors",
+        affected_users: `${ctx.targetUsers} requiring workflow integration`,
         current_solutions: "Standalone applications with limited or paid integration options",
         gaps_in_market: "Native integrations with popular tools and open API access",
         why_existing_fails: "Proprietary mindset and technical debt limiting extensibility",
         severity_score: 7,
         frequency_score: 8,
-        business_impact: "Reduced efficiency and adoption - organizations report 25% productivity loss",
+        business_impact: "Reduced efficiency - organizations report 25% productivity loss",
         technical_difficulty: "High",
-        evidence_examples: ["Integration requests from users", "Workflow disruption reports", "Manual data entry complaints"]
+        evidence_examples: ["Integration requests", "Workflow disruption reports", "Manual data entry complaints"]
       },
       {
         id: "PROB-003",
-        title: "Performance and Scalability Issues",
-        deep_description: `Existing ${primaryTerm} solutions often struggle with performance at scale, leading to poor user experiences during peak usage periods. Slow response times, timeouts, and system failures are common complaints that erode user trust and prevent enterprise adoption.`,
-        root_cause: "Inadequate infrastructure planning, monolithic architecture, and lack of performance optimization",
-        affected_users: "All users, especially during high-traffic periods and enterprise deployments",
+        title: "Performance and Scalability",
+        deep_description: `Existing ${ctx.productType} solutions in ${ctx.industry} often struggle with performance at scale. Slow response times, timeouts, and system failures are common complaints that erode trust and prevent ${ctx.isB2B ? 'enterprise' : 'mass'} adoption.`,
+        root_cause: "Inadequate infrastructure planning and monolithic architecture",
+        affected_users: `All ${ctx.targetUsers}, especially during peak usage`,
         current_solutions: "Performance-limited legacy systems with frequent downtime",
-        gaps_in_market: "Cloud-native, auto-scaling solutions with guaranteed uptime",
-        why_existing_fails: "Technical debt, cost constraints, and infrastructure underinvestment",
+        gaps_in_market: `Cloud-native, auto-scaling ${ctx.productType} with guaranteed uptime`,
+        why_existing_fails: "Technical debt and infrastructure underinvestment",
         severity_score: 8,
         frequency_score: 7,
-        business_impact: "User churn, negative reviews, and lost enterprise deals - estimated ₹50L+ in lost revenue annually",
+        business_impact: "User churn and lost deals - estimated ₹50L+ in lost revenue annually",
         technical_difficulty: "High",
-        evidence_examples: ["Performance complaints", "System downtime reports", "Speed comparison data"]
+        evidence_examples: ["Performance complaints", "Downtime reports", "Speed comparisons"]
       },
       {
         id: "PROB-004",
-        title: "Lack of Customization Options",
-        deep_description: `Users frequently require specific customizations that aren't available in current ${primaryTerm} solutions. This one-size-fits-all approach fails to address the unique needs of different user segments, industries, and use cases.`,
-        root_cause: "Product strategy prioritizing simplicity over flexibility, limited development resources",
-        affected_users: "Power users, enterprise customers, and specialized industry verticals",
-        current_solutions: "Rigid, non-customizable products with feature requests backlogged",
-        gaps_in_market: "Flexible customization framework with plugin/extension ecosystem",
-        why_existing_fails: "Short-term focus on feature parity rather than platform extensibility",
+        title: `${ctx.industry}-Specific Customization Gaps`,
+        deep_description: `${ctx.targetUsers} frequently require specific customizations for ${ctx.industry} that aren't available in current solutions. This one-size-fits-all approach fails to address unique ${ctx.industry} requirements.`,
+        root_cause: "Product strategy prioritizing breadth over depth in industry verticals",
+        affected_users: `${ctx.targetUsers} with specialized ${ctx.industry} needs`,
+        current_solutions: "Generic products with feature requests backlogged",
+        gaps_in_market: `${ctx.industry}-specific customization and configuration options`,
+        why_existing_fails: "Focus on horizontal features rather than vertical depth",
         severity_score: 7,
         frequency_score: 8,
-        business_impact: "Limited enterprise penetration and reduced deal sizes",
+        business_impact: "Limited penetration in specialized segments",
         technical_difficulty: "Medium",
-        evidence_examples: ["Customization feature requests", "Enterprise RFP rejections", "User workaround documentation"]
+        evidence_examples: ["Industry-specific feature requests", "RFP rejections", "Workaround documentation"]
       },
       {
         id: "PROB-005",
         title: "Inadequate Customer Support",
-        deep_description: `Current ${primaryTerm} solutions provide limited customer support, leading to user frustration and abandonment. Long response times, unhelpful documentation, and lack of personalized assistance create negative experiences that damage brand perception.`,
-        root_cause: "Cost-cutting measures in customer service and over-reliance on self-service",
-        affected_users: "All user segments, particularly new users and those facing technical issues",
+        deep_description: `Current ${ctx.productType} solutions provide limited support for ${ctx.targetUsers}. Long response times and lack of ${ctx.industry}-specific expertise create negative experiences.`,
+        root_cause: "Underinvestment in customer success and ${ctx.industry} expertise",
+        affected_users: `${ctx.targetUsers}, particularly those new to the platform`,
         current_solutions: "Basic FAQ and email support with 48+ hour response times",
-        gaps_in_market: "Comprehensive, responsive customer support with multiple channels",
-        why_existing_fails: "Underinvestment in customer success and support infrastructure",
+        gaps_in_market: `Responsive, ${ctx.industry}-knowledgeable support team`,
+        why_existing_fails: "Cost-cutting in customer service",
         severity_score: 7,
         frequency_score: 8,
-        business_impact: "Increased churn and negative word-of-mouth - 30% of churn attributed to support issues",
+        business_impact: "Increased churn - 30% attributed to support issues",
         technical_difficulty: "Low",
-        evidence_examples: ["Support ticket analysis", "Customer satisfaction scores", "Churn reason surveys"]
+        evidence_examples: ["Support ticket analysis", "NPS scores", "Churn surveys"]
       },
       {
         id: "PROB-006",

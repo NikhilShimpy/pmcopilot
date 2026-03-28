@@ -34,6 +34,7 @@ const DEPTH_CONFIG: Record<OutputDepth, {
   aimTasks: number;
   descriptionLength: string;
   timeout: number;
+  maxTokens: number; // NEW: Control output token limit
 }> = {
   short: {
     minProblems: 5,
@@ -44,6 +45,7 @@ const DEPTH_CONFIG: Record<OutputDepth, {
     aimTasks: 15,
     descriptionLength: 'concise (50-100 words per section)',
     timeout: 45000,
+    maxTokens: 4096,
   },
   medium: {
     minProblems: 8,
@@ -54,6 +56,7 @@ const DEPTH_CONFIG: Record<OutputDepth, {
     aimTasks: 25,
     descriptionLength: 'balanced (100-200 words per section)',
     timeout: 60000,
+    maxTokens: 6144,
   },
   long: {
     minProblems: 12,
@@ -64,6 +67,7 @@ const DEPTH_CONFIG: Record<OutputDepth, {
     aimTasks: 40,
     descriptionLength: 'comprehensive (200-400 words per section)',
     timeout: 90000,
+    maxTokens: 32768, // Raised to support full problem+feature+task generation
   },
   'extra-long': {
     minProblems: 15,
@@ -72,8 +76,9 @@ const DEPTH_CONFIG: Record<OutputDepth, {
     aimFeatures: 40,
     minTasks: 40,
     aimTasks: 60,
-    descriptionLength: 'maximum detail (400-600+ words per section, include examples and edge cases)',
+    descriptionLength: 'MAXIMUM detail (400-800+ words per section, include examples, edge cases, and deep analysis)',
     timeout: 120000,
+    maxTokens: 32768, // Raised to support exhaustive output
   },
 };
 
@@ -97,9 +102,14 @@ interface EnhancedAnalyzeRequest {
  */
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
+  const requestId = request.headers.get('X-Request-Id') || `server-${Date.now()}`;
 
   try {
     logger.apiRequest('POST', '/api/analyze');
+    logger.info(`[Analyze API] Request received`, {
+      requestId,
+      timestamp: new Date().toISOString(),
+    });
 
     // Parse request body
     let body: EnhancedAnalyzeRequest;
@@ -109,6 +119,13 @@ export async function POST(request: NextRequest) {
       throwValidationError('Invalid JSON in request body');
       return;
     }
+
+    logger.info(`[Analyze API] Request parsed`, {
+      requestId,
+      feedbackLength: body.feedback?.length || 0,
+      detailLevel: body.detail_level,
+      projectId: body.project_id,
+    });
 
     // Validate required fields
     validateRequired(body, ['feedback']);
@@ -174,29 +191,40 @@ export async function POST(request: NextRequest) {
       hasProjectId: !!body.project_id,
       isAuthenticated,
       depthLevel,
+      maxTokens: depthConfig.maxTokens,
       expectedProblems: `${depthConfig.minProblems}-${depthConfig.aimProblems}`,
       expectedFeatures: `${depthConfig.minFeatures}-${depthConfig.aimFeatures}`,
       expectedTasks: `${depthConfig.minTasks}-${depthConfig.aimTasks}`,
     });
 
-    // Run comprehensive analysis with depth-aware prompt
+    // Run comprehensive analysis with depth-aware prompt and token config
     const comprehensiveResult = await runComprehensiveStrategyAnalysis(
       body.feedback,
-      pipelineContext
+      {
+        ...pipelineContext,
+        maxTokens: depthConfig.maxTokens,
+        timeout: depthConfig.timeout,
+      }
     );
 
     if (!comprehensiveResult.success || !comprehensiveResult.result) {
       logger.error('Analysis failed', {
+        requestId,
         error: comprehensiveResult.error,
+        provider: comprehensiveResult.provider,
       });
 
-      return successResponse(
-        {
+      // Return proper error response - NOT using successResponse for errors
+      return new Response(
+        JSON.stringify({
           success: false,
           error: comprehensiveResult.error || 'Analysis failed',
-        },
-        'Analysis failed',
-        500
+          provider: comprehensiveResult.provider || 'none',
+        }),
+        {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' },
+        }
       );
     }
 
@@ -211,13 +239,14 @@ export async function POST(request: NextRequest) {
 
       if (saveResult) {
         savedAnalysisId = saveResult.id;
-        logger.info('Analysis saved', { analysisId: savedAnalysisId });
+        logger.info('Analysis saved', { requestId, analysisId: savedAnalysisId });
       }
     }
 
     const processingTime = Date.now() - startTime;
 
     logger.apiResponse('POST', '/api/analyze', 200, {
+      requestId,
       analysisId: comprehensiveResult.result.metadata?.analysis_id,
       savedId: savedAnalysisId,
       problemsFound: comprehensiveResult.result.problem_analysis?.length || 0,

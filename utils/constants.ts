@@ -49,7 +49,8 @@ export const HTTP_STATUS = {
 /**
  * AI PROVIDER HIERARCHY:
  * 1. PRIMARY: Google Gemini API
- * 2. FALLBACK: Groq (ONLY if Gemini fails)
+ * 2. FALLBACK: Groq
+ * 3. FALLBACK 2: Claude (Anthropic) - if available
  *
  * REMOVED: Ollama, HuggingFace, OpenRouter, Puter
  */
@@ -57,9 +58,9 @@ export const AI_CONFIG = {
   // PRIMARY: Google Gemini API
   GEMINI: {
     BASE_URL: 'https://generativelanguage.googleapis.com/v1beta/models',
-    DEFAULT_MODEL: 'gemini-2.0-flash', // Latest fast model (2024)
-    PRO_MODEL: 'gemini-1.5-pro-latest', // Complex tasks
-    TIMEOUT: 60000, // 60 seconds
+    DEFAULT_MODEL: 'gemini-2.5-flash', // Stable Gemini 2.5 Flash (2026 production model)
+    PRO_MODEL: 'gemini-2.5-pro', // For complex tasks
+    TIMEOUT: 90000, // 90 seconds (increased for reliability)
   },
 
   // FALLBACK: Groq (only if Gemini fails)
@@ -71,9 +72,17 @@ export const AI_CONFIG = {
     TIMEOUT: 90000,
   },
 
+  // FALLBACK 2: Claude (Anthropic) - optional third provider
+  CLAUDE: {
+    BASE_URL: 'https://api.anthropic.com/v1',
+    MESSAGES_ENDPOINT: '/messages',
+    DEFAULT_MODEL: 'claude-3-5-sonnet-20241022',
+    TIMEOUT: 60000,
+  },
+
   MAX_RETRIES: 2,
   DEFAULT_TEMPERATURE: 0.7,
-  DEFAULT_MAX_TOKENS: 8192,
+  DEFAULT_MAX_TOKENS: 32768, // Raised from 8192 to support comprehensive output
 
   // Pipeline-specific configuration
   PIPELINE: {

@@ -42,7 +42,7 @@ export default function DashboardClient({ user, profile }: DashboardClientProps)
     } else {
       showToast(result.error || 'Failed to create project', 'error')
     }
-    return result
+    return result  // Return the full result including project data
   }
 
   const handleDeleteProject = async (id: string) => {

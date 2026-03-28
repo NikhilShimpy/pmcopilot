@@ -10,7 +10,7 @@ interface UseProjectsReturn {
   error: string | null
   needsSetup: boolean
   fetchProjects: () => Promise<void>
-  createProject: (name: string, description?: string) => Promise<{ success: boolean; error?: string }>
+  createProject: (name: string, description?: string) => Promise<{ success: boolean; project?: Project; error?: string }>
   deleteProject: (id: string) => Promise<{ success: boolean; error?: string }>
   updateProject: (id: string, name: string, description?: string) => Promise<{ success: boolean; error?: string }>
   projectCount: number
@@ -99,7 +99,7 @@ export function useProjects(): UseProjectsReturn {
       }
 
       setProjects(prev => [data, ...prev])
-      return { success: true }
+      return { success: true, project: data }
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Failed to create project' }
     }
