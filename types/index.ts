@@ -177,6 +177,9 @@ export interface EnvironmentConfig {
   groq: {
     apiKey: string;
   };
+  claude: {
+    apiKey: string;
+  };
   app: {
     env: 'development' | 'production' | 'test';
   };

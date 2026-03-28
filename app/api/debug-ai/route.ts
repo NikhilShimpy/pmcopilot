@@ -3,11 +3,30 @@
  */
 
 import { NextRequest } from 'next/server';
-import { callAI } from '@/lib/aiEngine';
+import { callAI, resetRateLimits, getRateLimitStatus } from '@/lib/aiEngine';
 import { logger } from '@/lib/logger';
 
 export async function POST(request: NextRequest) {
   try {
+    // Check for reset action
+    const body = await request.json().catch(() => ({}));
+    
+    if (body.action === 'reset-rate-limits') {
+      resetRateLimits();
+      return Response.json({
+        success: true,
+        message: 'Rate limits reset successfully',
+        status: getRateLimitStatus(),
+      });
+    }
+    
+    if (body.action === 'status') {
+      return Response.json({
+        success: true,
+        status: getRateLimitStatus(),
+      });
+    }
+    
     console.log('🔍 Testing AI providers...');
 
     // Simple test messages
@@ -35,7 +54,8 @@ export async function POST(request: NextRequest) {
       success: true,
       provider: result.provider,
       content: result.content,
-      message: 'AI providers working correctly'
+      message: 'AI providers working correctly',
+      rateLimitStatus: getRateLimitStatus(),
     });
 
   } catch (error) {
@@ -46,14 +66,20 @@ export async function POST(request: NextRequest) {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
       details: error instanceof Error ? error.stack : undefined,
-      message: 'AI providers failed - check API keys and connectivity'
+      message: 'AI providers failed - check API keys and connectivity',
+      rateLimitStatus: getRateLimitStatus(),
     }, { status: 500 });
   }
 }
 
 export async function GET() {
   return Response.json({
-    message: 'AI Debug endpoint - use POST to test AI providers',
-    instructions: 'Send a POST request to test AI connectivity'
+    message: 'AI Debug endpoint',
+    instructions: {
+      test: 'POST {} to test AI providers',
+      status: 'POST {"action": "status"} to get rate limit status',
+      reset: 'POST {"action": "reset-rate-limits"} to reset rate limits',
+    },
+    rateLimitStatus: getRateLimitStatus(),
   });
 }

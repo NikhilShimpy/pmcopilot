@@ -64,6 +64,218 @@ interface GroqResponse {
   };
 }
 
+interface ClaudeResponse {
+  content: Array<{
+    type: string;
+    text: string;
+  }>;
+  usage?: {
+    input_tokens: number;
+    output_tokens: number;
+  };
+}
+
+// ============================================
+// RATE LIMIT TRACKING
+// ============================================
+
+interface RateLimitState {
+  lastError: Date | null;
+  consecutiveErrors: number;
+  backoffUntil: Date | null;
+}
+
+const rateLimitState: Record<string, RateLimitState> = {
+  gemini: { lastError: null, consecutiveErrors: 0, backoffUntil: null },
+  groq: { lastError: null, consecutiveErrors: 0, backoffUntil: null },
+  claude: { lastError: null, consecutiveErrors: 0, backoffUntil: null },
+};
+
+function isRateLimited(provider: 'gemini' | 'groq' | 'claude'): boolean {
+  const state = rateLimitState[provider];
+  if (!state.backoffUntil) return false;
+  return new Date() < state.backoffUntil;
+}
+
+function recordRateLimitError(provider: 'gemini' | 'groq' | 'claude') {
+  const state = rateLimitState[provider];
+  state.lastError = new Date();
+  state.consecutiveErrors++;
+  // Exponential backoff: 30s, 60s, 120s, 240s, max 5min
+  const backoffSeconds = Math.min(30 * Math.pow(2, state.consecutiveErrors - 1), 300);
+  state.backoffUntil = new Date(Date.now() + backoffSeconds * 1000);
+  logger.warn(`Rate limit recorded for ${provider}`, {
+    consecutiveErrors: state.consecutiveErrors,
+    backoffUntil: state.backoffUntil.toISOString(),
+    backoffSeconds,
+  });
+}
+
+function recordSuccess(provider: 'gemini' | 'groq' | 'claude') {
+  const state = rateLimitState[provider];
+  state.consecutiveErrors = 0;
+  state.backoffUntil = null;
+}
+
+// Reset rate limits - useful for debugging or forced retry
+export function resetRateLimits() {
+  rateLimitState.gemini = { lastError: null, consecutiveErrors: 0, backoffUntil: null };
+  rateLimitState.groq = { lastError: null, consecutiveErrors: 0, backoffUntil: null };
+  logger.info('🔄 Rate limits reset');
+}
+
+// Get current rate limit status for debugging
+export function getRateLimitStatus(): Record<string, { isLimited: boolean; backoffUntil: string | null; errors: number }> {
+  return {
+    gemini: {
+      isLimited: isRateLimited('gemini'),
+      backoffUntil: rateLimitState.gemini.backoffUntil?.toISOString() || null,
+      errors: rateLimitState.gemini.consecutiveErrors,
+    },
+    groq: {
+      isLimited: isRateLimited('groq'),
+      backoffUntil: rateLimitState.groq.backoffUntil?.toISOString() || null,
+      errors: rateLimitState.groq.consecutiveErrors,
+    },
+    claude: {
+      isLimited: isRateLimited('claude'),
+      backoffUntil: rateLimitState.claude.backoffUntil?.toISOString() || null,
+      errors: rateLimitState.claude.consecutiveErrors,
+    },
+  };
+}
+
+// ============================================
+// ERROR CLASSIFICATION
+// ============================================
+
+interface GeminiErrorClassification {
+  type: 'config_error' | 'rate_limit' | 'transient_error' | 'unknown';
+  shouldFallback: boolean;
+  shouldRetry: boolean;
+  message: string;
+}
+
+function classifyGeminiError(error: any): GeminiErrorClassification {
+  if (!error.response) {
+    // Network error or timeout
+    if (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') {
+      return {
+        type: 'transient_error',
+        shouldFallback: true,
+        shouldRetry: true,
+        message: 'Network timeout',
+      };
+    }
+    return {
+      type: 'transient_error',
+      shouldFallback: true,
+      shouldRetry: true,
+      message: error.message || 'Network error',
+    };
+  }
+
+  const status = error.response.status;
+  const errorData = error.response.data;
+  const errorMessage = typeof errorData === 'string' 
+    ? errorData 
+    : JSON.stringify(errorData || '');
+
+  // CONFIG ERRORS - Do NOT fallback, fail loudly
+  if (status === 400) {
+    return {
+      type: 'config_error',
+      shouldFallback: false,
+      shouldRetry: false,
+      message: `Bad request: ${errorMessage.substring(0, 200)}`,
+    };
+  }
+  
+  if (status === 401) {
+    return {
+      type: 'config_error',
+      shouldFallback: false,
+      shouldRetry: false,
+      message: 'Invalid API key - check GEMINI_API_KEY',
+    };
+  }
+  
+  if (status === 403) {
+    return {
+      type: 'config_error',
+      shouldFallback: false,
+      shouldRetry: false,
+      message: 'Permission denied - API key may lack permissions or billing not enabled',
+    };
+  }
+  
+  if (status === 404) {
+    // Model not found - THIS IS A CONFIG ERROR, NOT RATE LIMIT
+    return {
+      type: 'config_error',
+      shouldFallback: false,
+      shouldRetry: false,
+      message: `Model not found: ${AI_CONFIG.GEMINI.DEFAULT_MODEL}. Check available models at https://ai.google.dev/models`,
+    };
+  }
+
+  // RATE LIMIT - Allow fallback
+  if (status === 429) {
+    // Check if it's a spending cap vs rate limit
+    const errorMessage = typeof errorData === 'string' ? errorData : JSON.stringify(errorData);
+    const isSpendingCap = errorMessage.includes('spending cap') || errorMessage.includes('billing');
+    
+    if (isSpendingCap) {
+      // Spending cap - longer backoff, immediate fallback
+      return {
+        type: 'config_error', // Treat as config issue, not transient
+        shouldFallback: true,
+        shouldRetry: false,
+        message: 'Spending cap exceeded - increase your Google Cloud billing limit at https://console.cloud.google.com/billing',
+      };
+    }
+    
+    // Regular rate limit
+    return {
+      type: 'rate_limit',
+      shouldFallback: true,
+      shouldRetry: false, // Don't retry 429, fallback immediately
+      message: 'Rate limit exceeded',
+    };
+  }
+
+  // TRANSIENT ERRORS - Allow fallback and retry
+  if (status >= 500 && status <= 599) {
+    return {
+      type: 'transient_error',
+      shouldFallback: true,
+      shouldRetry: true,
+      message: `Server error: ${status}`,
+    };
+  }
+
+  // Unknown error - allow fallback but log
+  return {
+    type: 'unknown',
+    shouldFallback: true,
+    shouldRetry: false,
+    message: `Unknown error: ${status} - ${errorMessage.substring(0, 100)}`,
+  };
+}
+
+function isTransientError(error: any): boolean {
+  const classification = classifyGeminiError(error);
+  return classification.type === 'transient_error' || classification.type === 'rate_limit';
+}
+
+function isRateLimitError(error: any): boolean {
+  if (!error.response) return false;
+  const status = error.response.status;
+  // ONLY 429 is a rate limit error
+  // 503 can be rate limit but we classify it as transient
+  return status === 429;
+}
+
 // ============================================
 // GEMINI API CLIENT (PRIMARY)
 // ============================================
@@ -84,6 +296,15 @@ async function callGemini(
     jsonMode = true,
   } = options;
 
+  // Check if we're in backoff period
+  if (isRateLimited('gemini')) {
+    const state = rateLimitState.gemini;
+    logger.warn('Gemini is rate-limited, skipping attempt', {
+      backoffUntil: state.backoffUntil?.toISOString(),
+    });
+    throw new Error(`Gemini rate-limited until ${state.backoffUntil?.toISOString()}`);
+  }
+
   const model = AI_CONFIG.GEMINI.DEFAULT_MODEL;
   const url = `${AI_CONFIG.GEMINI.BASE_URL}/${model}:generateContent?key=${config.gemini.apiKey}`;
 
@@ -91,6 +312,7 @@ async function callGemini(
     messageCount: messages.length,
     model,
     jsonMode,
+    maxTokens: max_tokens,
   });
 
   try {
@@ -105,7 +327,7 @@ async function callGemini(
 
     const generationConfig: any = {
       temperature,
-      maxOutputTokens: max_tokens,
+      maxOutputTokens: Math.min(max_tokens * 4, 32768), // Gemini 2.5 supports up to 65536, use 32768 for safety
     };
 
     // Only add JSON mode for analysis, not for chat
@@ -142,17 +364,62 @@ async function callGemini(
       throw new Error('No content in Gemini response');
     }
 
-    logger.ai('Gemini API call successful', 'gemini', {
+    // Success - reset rate limit tracking
+    recordSuccess('gemini');
+
+    logger.ai('✅ Gemini API call SUCCESSFUL', 'gemini', {
       tokens: response.data.usageMetadata?.totalTokenCount,
       model,
+      responseLength: content.length,
+    });
+
+    // Detailed token usage logging for monitoring output truncation
+    logger.info('📊 Gemini token usage details', {
+      inputTokens: response.data.usageMetadata?.promptTokenCount ?? 'unknown',
+      outputTokens: response.data.usageMetadata?.candidatesTokenCount ?? 'unknown',
+      totalTokens: response.data.usageMetadata?.totalTokenCount ?? 'unknown',
+      maxOutputTokens: generationConfig.maxOutputTokens,
+      outputUtilization: response.data.usageMetadata?.candidatesTokenCount 
+        ? `${Math.round((response.data.usageMetadata.candidatesTokenCount / generationConfig.maxOutputTokens) * 100)}%`
+        : 'unknown',
+      truncated: response.data.usageMetadata?.candidatesTokenCount >= generationConfig.maxOutputTokens ? '⚠️ YES' : 'no',
     });
 
     return content;
   } catch (error: any) {
+    const classification = classifyGeminiError(error);
+    
     if (error.response) {
-      logger.error('Gemini API error response', {
-        status: error.response.status,
-        data: JSON.stringify(error.response.data).substring(0, 500),
+      const status = error.response.status;
+      const errorData = error.response.data;
+      
+      logger.error('❌ Gemini API ERROR', {
+        status,
+        statusText: error.response.statusText,
+        data: JSON.stringify(errorData).substring(0, 500),
+        model,
+        errorType: classification.type,
+        shouldFallback: classification.shouldFallback,
+        classificationMessage: classification.message,
+      });
+
+      // Only track rate limit for actual rate limit errors (429)
+      if (classification.type === 'rate_limit') {
+        recordRateLimitError('gemini');
+      }
+      
+      // For config errors, throw a special error that prevents fallback
+      if (classification.type === 'config_error') {
+        const configError = new Error(`GEMINI_CONFIG_ERROR: ${classification.message}`);
+        (configError as any).isConfigError = true;
+        (configError as any).shouldFallback = false;
+        throw configError;
+      }
+    } else if (error.code === 'ECONNABORTED') {
+      logger.error('❌ Gemini API TIMEOUT', { timeout, model });
+    } else {
+      logger.error('❌ Gemini API UNKNOWN ERROR', { 
+        message: error.message,
         model,
       });
     }
@@ -180,8 +447,17 @@ async function callGroq(
     jsonMode = true,
   } = options;
 
-  // Cap max_tokens to Groq's limit (8192 for output)
-  const safeMaxTokens = Math.min(max_tokens, 8000);
+  // Check if we're in backoff period
+  if (isRateLimited('groq')) {
+    const state = rateLimitState.groq;
+    logger.warn('Groq is rate-limited, skipping attempt', {
+      backoffUntil: state.backoffUntil?.toISOString(),
+    });
+    throw new Error(`Groq rate-limited until ${state.backoffUntil?.toISOString()}`);
+  }
+
+  // Cap max_tokens to Groq's limit (32768 for llama-3.3-70b-versatile)
+  const safeMaxTokens = Math.min(max_tokens, 32768);
   const model = AI_CONFIG.GROQ.DEFAULT_MODEL;
   const url = `${AI_CONFIG.GROQ.BASE_URL}${AI_CONFIG.GROQ.CHAT_ENDPOINT}`;
 
@@ -189,6 +465,7 @@ async function callGroq(
     messageCount: messages.length,
     model,
     jsonMode,
+    maxTokens: safeMaxTokens,
   });
 
   try {
@@ -228,17 +505,38 @@ async function callGroq(
       throw new Error('No content in Groq response');
     }
 
-    logger.ai('Groq API call successful', 'groq', {
+    // Success - reset rate limit tracking
+    recordSuccess('groq');
+
+    logger.ai('✅ Groq API call SUCCESSFUL', 'groq', {
       tokens: response.data.usage?.total_tokens,
       model,
+      responseLength: content.length,
     });
 
     return content;
   } catch (error: any) {
     if (error.response) {
-      logger.error('Groq API error response', {
-        status: error.response.status,
-        data: JSON.stringify(error.response.data).substring(0, 500),
+      const status = error.response.status;
+      const errorData = error.response.data;
+
+      logger.error('❌ Groq API ERROR', {
+        status,
+        statusText: error.response.statusText,
+        data: JSON.stringify(errorData).substring(0, 500),
+        model,
+        isRateLimit: isRateLimitError(error),
+      });
+
+      // Track rate limit errors
+      if (isRateLimitError(error)) {
+        recordRateLimitError('groq');
+      }
+    } else if (error.code === 'ECONNABORTED') {
+      logger.error('❌ Groq API TIMEOUT', { timeout, model });
+    } else {
+      logger.error('❌ Groq API UNKNOWN ERROR', {
+        message: error.message,
         model,
       });
     }
@@ -247,7 +545,143 @@ async function callGroq(
 }
 
 // ============================================
-// AI CALL WITH FALLBACK (GEMINI -> GROQ)
+// CLAUDE API CLIENT (FALLBACK 2 - OPTIONAL)
+// ============================================
+
+async function callClaude(
+  messages: AIMessage[],
+  options: {
+    temperature?: number;
+    max_tokens?: number;
+    timeout?: number;
+    jsonMode?: boolean;
+  } = {}
+): Promise<string> {
+  const {
+    temperature = AI_CONFIG.DEFAULT_TEMPERATURE,
+    max_tokens = AI_CONFIG.DEFAULT_MAX_TOKENS,
+    timeout = AI_CONFIG.CLAUDE.TIMEOUT,
+    jsonMode = true,
+  } = options;
+
+  // Check if Claude API key is configured
+  if (!config.claude.apiKey) {
+    throw new Error('Claude API key not configured');
+  }
+
+  // Check if we're in backoff period
+  if (isRateLimited('claude')) {
+    const state = rateLimitState.claude;
+    logger.warn('Claude is rate-limited, skipping attempt', {
+      backoffUntil: state.backoffUntil?.toISOString(),
+    });
+    throw new Error(`Claude rate-limited until ${state.backoffUntil?.toISOString()}`);
+  }
+
+  const model = AI_CONFIG.CLAUDE.DEFAULT_MODEL;
+  const url = `${AI_CONFIG.CLAUDE.BASE_URL}${AI_CONFIG.CLAUDE.MESSAGES_ENDPOINT}`;
+
+  logger.ai('Calling Claude API (FALLBACK 2)', 'claude', {
+    messageCount: messages.length,
+    model,
+    jsonMode,
+    maxTokens: max_tokens,
+  });
+
+  try {
+    // Filter out system messages - Claude handles them separately
+    const claudeMessages = messages
+      .filter(m => m.role !== 'system')
+      .map(m => ({
+        role: m.role === 'assistant' ? 'assistant' : 'user',
+        content: m.content
+      }));
+
+    const systemContent = messages.find(m => m.role === 'system')?.content;
+
+    const requestBody: any = {
+      model,
+      messages: claudeMessages,
+      temperature,
+      max_tokens: max_tokens,
+    };
+
+    // Add system prompt if present
+    if (systemContent) {
+      requestBody.system = systemContent;
+    }
+
+    // Add JSON mode instruction if needed
+    if (jsonMode) {
+      requestBody.messages = [
+        ...claudeMessages,
+        {
+          role: 'user',
+          content: 'Please respond with valid JSON.'
+        }
+      ];
+    }
+
+    const response = await axios.post<ClaudeResponse>(
+      url,
+      requestBody,
+      {
+        headers: {
+          'x-api-key': config.claude.apiKey,
+          'Content-Type': 'application/json',
+          'anthropic-version': '2023-06-01',
+        },
+        timeout,
+      }
+    );
+
+    const content = response.data.content?.[0]?.text;
+
+    if (!content) {
+      throw new Error('No content in Claude response');
+    }
+
+    // Success - reset rate limit tracking
+    recordSuccess('claude');
+
+    logger.ai('✅ Claude API call SUCCESSFUL', 'claude', {
+      tokens: (response.data.usage?.input_tokens || 0) + (response.data.usage?.output_tokens || 0),
+      model,
+      responseLength: content.length,
+    });
+
+    return content;
+  } catch (error: any) {
+    if (error.response) {
+      const status = error.response.status;
+      const errorData = error.response.data;
+
+      logger.error('❌ Claude API ERROR', {
+        status,
+        statusText: error.response.statusText,
+        data: JSON.stringify(errorData).substring(0, 500),
+        model,
+        isRateLimit: isRateLimitError(error),
+      });
+
+      // Track rate limit errors
+      if (isRateLimitError(error)) {
+        recordRateLimitError('claude');
+      }
+    } else if (error.code === 'ECONNABORTED') {
+      logger.error('❌ Claude API TIMEOUT', { timeout, model });
+    } else {
+      logger.error('❌ Claude API UNKNOWN ERROR', {
+        message: error.message,
+        model,
+      });
+    }
+    throw error;
+  }
+}
+
+// ============================================
+// AI CALL WITH FALLBACK (GEMINI -> GROQ -> CLAUDE)
 // ============================================
 
 export async function callAI(
@@ -259,47 +693,155 @@ export async function callAI(
     retries?: number;
     jsonMode?: boolean;
   } = {}
-): Promise<{ content: string; provider: 'gemini' | 'groq' }> {
+): Promise<{ content: string; provider: 'gemini' | 'groq' | 'claude' }> {
   const { retries = AI_CONFIG.MAX_RETRIES, jsonMode = true, ...callOptions } = options;
 
-  let lastError: Error | null = null;
+  let lastGeminiError: Error | null = null;
+  let lastGroqError: Error | null = null;
+  let lastClaudeError: Error | null = null;
 
-  // PRIMARY: Try Gemini with retries
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      logger.info(`Gemini attempt ${attempt + 1}/${retries + 1}`);
-      const content = await callGemini(messages, { ...callOptions, jsonMode });
-      return { content, provider: 'gemini' };
-    } catch (error) {
-      lastError = error as Error;
-      logger.warn(`Gemini attempt ${attempt + 1} failed`, {
-        error: lastError.message,
-      });
+  // Check if providers are available (not in backoff)
+  const geminiAvailable = !isRateLimited('gemini');
+  const groqAvailable = !isRateLimited('groq');
+  const claudeAvailable = !isRateLimited('claude') && !!config.claude.apiKey;
 
-      if (attempt < retries) {
-        await sleep(1000 * (attempt + 1)); // Exponential backoff
+  logger.info('🚀 Starting AI provider chain', {
+    geminiAvailable,
+    groqAvailable,
+    claudeAvailable,
+    retries,
+    maxTokens: callOptions.max_tokens,
+    geminiModel: AI_CONFIG.GEMINI.DEFAULT_MODEL,
+  });
+
+  // PRIMARY: Try Gemini with retries (if not rate-limited)
+  if (geminiAvailable) {
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        logger.info(`📡 Gemini attempt ${attempt + 1}/${retries + 1}`);
+        const content = await callGemini(messages, { ...callOptions, jsonMode });
+        logger.info('✅ SUCCESS: Using Gemini output');
+        return { content, provider: 'gemini' };
+      } catch (error: any) {
+        lastGeminiError = error as Error;
+        
+        // CHECK FOR CONFIG ERRORS - DO NOT FALLBACK, FAIL IMMEDIATELY
+        if (error.isConfigError === true) {
+          logger.error('🚫 GEMINI CONFIG ERROR - NOT FALLING BACK', {
+            error: error.message,
+            model: AI_CONFIG.GEMINI.DEFAULT_MODEL,
+            hint: 'Fix the Gemini configuration. This is not a transient error.',
+          });
+          throw error; // Propagate immediately, do not try other providers
+        }
+        
+        logger.warn(`⚠️ Gemini attempt ${attempt + 1} failed`, {
+          error: lastGeminiError.message,
+          willRetry: attempt < retries && !isRateLimited('gemini'),
+        });
+
+        // If rate-limited after this error, don't retry
+        if (isRateLimited('gemini')) {
+          logger.warn('Gemini now rate-limited, stopping retries');
+          break;
+        }
+
+        if (attempt < retries) {
+          const backoffMs = 1000 * Math.pow(2, attempt); // 1s, 2s, 4s
+          logger.info(`Waiting ${backoffMs}ms before retry...`);
+          await sleep(backoffMs);
+        }
       }
+    }
+  } else {
+    logger.warn('⏳ Gemini skipped - currently rate-limited');
+  }
+
+  // FALLBACK 1: Try Groq
+  if (groqAvailable) {
+    logger.warn('🔄 Falling back to Groq', {
+      geminiError: lastGeminiError?.message,
+    });
+
+    for (let attempt = 0; attempt <= 1; attempt++) { // Max 2 attempts for Groq
+      try {
+        logger.info(`📡 Groq attempt ${attempt + 1}/2`);
+        const content = await callGroq(messages, { ...callOptions, jsonMode });
+        logger.info('✅ SUCCESS: Using Groq output');
+        return { content, provider: 'groq' };
+      } catch (error) {
+        lastGroqError = error as Error;
+        logger.warn(`⚠️ Groq attempt ${attempt + 1} failed`, {
+          error: lastGroqError.message,
+        });
+
+        if (isRateLimited('groq')) {
+          logger.warn('Groq now rate-limited, stopping retries');
+          break;
+        }
+
+        if (attempt < 1) {
+          await sleep(2000); // 2s wait before Groq retry
+        }
+      }
+    }
+  } else {
+    logger.warn('⏳ Groq skipped - currently rate-limited');
+    lastGroqError = new Error('Groq rate-limited');
+  }
+
+  // FALLBACK 2: Try Claude (if API key configured)
+  if (claudeAvailable) {
+    logger.warn('🔄 Falling back to Claude', {
+      geminiError: lastGeminiError?.message,
+      groqError: lastGroqError?.message,
+    });
+
+    for (let attempt = 0; attempt <= 1; attempt++) { // Max 2 attempts for Claude
+      try {
+        logger.info(`📡 Claude attempt ${attempt + 1}/2`);
+        const content = await callClaude(messages, { ...callOptions, jsonMode });
+        logger.info('✅ SUCCESS: Using Claude output');
+        return { content, provider: 'claude' };
+      } catch (error) {
+        lastClaudeError = error as Error;
+        logger.warn(`⚠️ Claude attempt ${attempt + 1} failed`, {
+          error: lastClaudeError.message,
+        });
+
+        if (isRateLimited('claude')) {
+          logger.warn('Claude now rate-limited, stopping retries');
+          break;
+        }
+
+        if (attempt < 1) {
+          await sleep(2000); // 2s wait before Claude retry
+        }
+      }
+    }
+  } else {
+    if (!config.claude.apiKey) {
+      logger.warn('⏳ Claude skipped - API key not configured');
+      lastClaudeError = new Error('Claude API key not configured');
+    } else {
+      logger.warn('⏳ Claude skipped - currently rate-limited');
+      lastClaudeError = new Error('Claude rate-limited');
     }
   }
 
-  // FALLBACK: Try Groq (single attempt)
-  logger.warn('Gemini failed after all retries, falling back to Groq', {
-    geminiError: lastError?.message,
+  // All providers failed
+  logger.error('❌ ALL AI PROVIDERS FAILED', {
+    geminiError: lastGeminiError?.message,
+    groqError: lastGroqError?.message,
+    claudeError: lastClaudeError?.message,
+    geminiRateLimited: isRateLimited('gemini'),
+    groqRateLimited: isRateLimited('groq'),
+    claudeRateLimited: isRateLimited('claude'),
   });
 
-  try {
-    const content = await callGroq(messages, { ...callOptions, jsonMode });
-    return { content, provider: 'groq' };
-  } catch (error) {
-    const groqError = error as Error;
-    logger.error('All AI providers failed', {
-      geminiError: lastError?.message,
-      groqError: groqError.message,
-    });
-    throw new Error(
-      `All AI providers failed. Gemini: ${lastError?.message}. Groq: ${groqError.message}`
-    );
-  }
+  throw new Error(
+    `All AI providers failed. Gemini: ${lastGeminiError?.message || 'rate-limited'}. Groq: ${lastGroqError?.message || 'rate-limited'}. Claude: ${lastClaudeError?.message || 'rate-limited/not-configured'}`
+  );
 }
 
 // ============================================

@@ -1,4 +1,18 @@
 import { EnvironmentConfig } from '@/types';
+import { AI_CONFIG } from '@/utils/constants';
+
+/**
+ * SUPPORTED GEMINI MODELS
+ * These are the stable models available via v1beta API
+ * Updated 2026 - Current production models
+ */
+const SUPPORTED_GEMINI_MODELS = [
+  'gemini-2.5-flash',        // Stable 2.5 (primary)
+  'gemini-2.5-flash-lite',   // Stable 2.5 lite (budget)
+  'gemini-2.5-pro',          // Stable 2.5 pro (advanced)
+  'gemini-3-flash',          // Preview 3.x
+  'gemini-3.1-pro',          // Preview 3.x
+];
 
 /**
  * Validates that required environment variables are present
@@ -35,7 +49,8 @@ function getEnv(
  *
  * AI PROVIDERS:
  * - PRIMARY: Google Gemini API
- * - FALLBACK: Groq (only if Gemini fails)
+ * - FALLBACK: Groq 
+ * - FALLBACK 2: Claude (Anthropic)
  *
  * REMOVED: Ollama, HuggingFace, OpenRouter
  */
@@ -49,6 +64,9 @@ export const config: EnvironmentConfig = {
   },
   groq: {
     apiKey: getEnv('GROQ_API_KEY'),
+  },
+  claude: {
+    apiKey: getEnv('CLAUDE_API_KEY', '', false), // Optional - if available
   },
   app: {
     env: (getEnv('NODE_ENV', 'development', false) as 'development' | 'production' | 'test'),
@@ -71,6 +89,37 @@ export const isDevelopment = config.app.env === 'development';
 export const isTest = config.app.env === 'test';
 
 /**
+ * Validates Gemini model configuration
+ */
+function validateGeminiModel(): { valid: boolean; model: string; message: string } {
+  const configuredModel = AI_CONFIG.GEMINI.DEFAULT_MODEL;
+  
+  if (!configuredModel) {
+    return {
+      valid: false,
+      model: '',
+      message: 'No Gemini model configured in AI_CONFIG.GEMINI.DEFAULT_MODEL',
+    };
+  }
+  
+  const isKnownModel = SUPPORTED_GEMINI_MODELS.some(m => configuredModel.startsWith(m));
+  
+  if (!isKnownModel) {
+    return {
+      valid: false,
+      model: configuredModel,
+      message: `Unknown Gemini model: "${configuredModel}". Supported models: ${SUPPORTED_GEMINI_MODELS.join(', ')}`,
+    };
+  }
+  
+  return {
+    valid: true,
+    model: configuredModel,
+    message: `Gemini model "${configuredModel}" is valid`,
+  };
+}
+
+/**
  * Validates all environment variables on startup
  */
 export function validateEnvironment(): void {
@@ -84,7 +133,17 @@ export function validateEnvironment(): void {
     ];
 
     console.log('[Config] Environment variables validated successfully ✓');
-    console.log('[Config] AI Providers: Gemini (PRIMARY) → Groq (FALLBACK)');
+    
+    // Validate Gemini model
+    const geminiValidation = validateGeminiModel();
+    if (geminiValidation.valid) {
+      console.log(`[Config] ✅ Gemini configured with model: ${geminiValidation.model}`);
+    } else {
+      console.error(`[Config] ⚠️ GEMINI MODEL WARNING: ${geminiValidation.message}`);
+    }
+    
+    const claudeStatus = config.claude.apiKey ? '✓' : '(optional)';
+    console.log(`[Config] AI Providers: Gemini (PRIMARY) → Groq (FALLBACK) → Claude ${claudeStatus}`);
   } catch (error) {
     console.error('[Config] Environment validation failed:', error);
     throw error;

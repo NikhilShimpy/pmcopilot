@@ -65,12 +65,71 @@ Use tables and visual formatting extensively.`,
 ## Recommendations
 Be very specific with user quotes and examples.`,
 
-  'feature-system': `Provide feature analysis with:
-## Feature List (table: Feature | Category | Priority | Business Value | Complexity)
-## Detailed Breakdown (for each feature: description, user value, technical approach, dependencies)
-## Implementation Roadmap (phased rollout)
-## Cost & Timeline (per feature)
-Include specific implementation steps.`,
+  'feature-system': `Provide COMPREHENSIVE feature analysis with:
+
+## Feature List (table: Feature | Category | Priority | Business Value | Complexity | Est. Time)
+
+## Detailed Feature Breakdown
+
+For EACH feature requested, provide:
+
+### [Feature Name]
+**1. Overview**
+- What it does (2-3 sentences)
+- Core value proposition
+
+**2. Functional Requirements**
+| Requirement ID | Description | Priority | Acceptance Criteria |
+|----------------|-------------|----------|---------------------|
+| FR-001 | ... | Must Have | ... |
+| FR-002 | ... | Should Have | ... |
+
+**3. Non-Functional Requirements**
+- Performance: Response time < 200ms
+- Scalability: Handle 10,000 concurrent users
+- Security: Data encryption at rest and in transit
+- Availability: 99.9% uptime
+
+**4. User Stories**
+- As a [user type], I want to [action], so that [benefit]
+
+**5. Dependencies**
+- Internal: [Other features needed first]
+- External: [Third-party services, APIs]
+
+**6. Technical Implementation**
+- Frontend components
+- Backend services
+- Database changes
+- API endpoints
+
+**7. MVP vs Later Phase**
+| MVP (Phase 1) | Phase 2 | Future |
+|---------------|---------|--------|
+| Core feature X | Enhancement Y | Advanced Z |
+
+**8. Risks & Mitigation**
+| Risk | Likelihood | Impact | Mitigation |
+|------|------------|--------|------------|
+
+**9. Acceptance Criteria (Gherkin format)**
+GIVEN [context]
+WHEN [action]
+THEN [expected result]
+
+**10. Cost & Timeline**
+- Development: ₹X.XL (Y weeks)
+- Testing: ₹X.XL (Z weeks)
+- Infrastructure impact: +₹X,XXX/month
+
+## Implementation Order (Prioritized)
+1. Feature A → 2. Feature B → 3. Feature C
+
+## Total Cost Summary
+| Feature | Dev Cost | Monthly Ops | Priority |
+|---------|----------|-------------|----------|
+| ... | ... | ... | ... |
+| **Total** | **₹X.XL** | **₹X.XL** | - |`,
 
   'gaps-opportunities': `Structure as:
 ## Market Gaps (table with: Gap | Evidence | Opportunity Size)

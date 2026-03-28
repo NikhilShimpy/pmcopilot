@@ -129,27 +129,99 @@ export default function ProjectOutputClient({
   // Export state
   const [showExportMenu, setShowExportMenu] = useState(false)
 
-  // Generate analysis on mount if shouldGenerate is true
-  useEffect(() => {
-    if (shouldGenerate && initialInput && !analysisResult && !isGenerating) {
-      handleGenerate()
-    }
-  }, [shouldGenerate, initialInput])
+  // Request-in-flight lock to prevent duplicate requests (React Strict Mode / fast re-renders)
+  const generationStartedRef = useRef(false)
+  const requestIdRef = useRef<string | null>(null)
+  const mountedRef = useRef(false)
+  const hasGeneratedRef = useRef(false) // Track if we've ever generated in this session
 
-  const handleGenerate = async () => {
+  // Clean URL after generation to prevent re-triggers on refresh/navigation
+  const cleanUrlParams = useCallback(() => {
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href)
+      url.searchParams.delete('generate')
+      window.history.replaceState({}, '', url.toString())
+      console.log('[PMCopilot] Cleaned URL params - removed generate flag')
+    }
+  }, [])
+
+  // Generate analysis on mount if shouldGenerate is true
+  // FIX: Use ref to prevent duplicate calls - removed isGenerating from deps
+  useEffect(() => {
+    // Track mount state to prevent double-execution in Strict Mode
+    if (mountedRef.current) {
+      console.log('[PMCopilot] Skip duplicate mount execution (Strict Mode)')
+      return // Already mounted, skip duplicate execution
+    }
+    mountedRef.current = true
+
+    // Only generate if:
+    // 1. shouldGenerate flag is true (from URL params)
+    // 2. We have input to analyze
+    // 3. No existing result
+    // 4. Generation hasn't been started yet in this mount cycle
+    // 5. Haven't generated before in this session
+    if (
+      shouldGenerate && 
+      initialInput && 
+      !analysisResult && 
+      !generationStartedRef.current &&
+      !hasGeneratedRef.current
+    ) {
+      // Set refs immediately to block any concurrent calls
+      generationStartedRef.current = true
+      hasGeneratedRef.current = true
+      const reqId = `req-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+      requestIdRef.current = reqId
+      console.log(`[PMCopilot] Starting generation (${reqId})`, {
+        shouldGenerate,
+        inputLength: initialInput.length,
+        outputLength,
+      })
+      handleGenerate(reqId)
+    } else if (shouldGenerate && (generationStartedRef.current || hasGeneratedRef.current)) {
+      console.log('[PMCopilot] Generation already started/completed, skipping duplicate trigger')
+      cleanUrlParams() // Clean URL even if we skip
+    }
+
+    // Cleanup: Reset on unmount
+    return () => {
+      mountedRef.current = false
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // Empty deps - only run on mount
+
+  const handleGenerate = async (requestId?: string) => {
+    const reqId = requestId || requestIdRef.current || `req-${Date.now()}`
+    
     if (!initialInput.trim()) {
       showToast('No input provided', 'error')
+      generationStartedRef.current = false
+      return
+    }
+
+    // Double-check we're not already generating (belt and suspenders)
+    if (isGenerating) {
+      console.log(`[PMCopilot] Duplicate request blocked (${reqId}) - already generating`)
       return
     }
 
     setIsGenerating(true)
     setError(null)
     setGenerationProgress('Starting AI analysis...')
+    console.log(`[PMCopilot] API call starting (${reqId})`, {
+      inputLength: initialInput.length,
+      outputLength,
+      projectId: project.id
+    })
 
     try {
       const response = await fetch('/api/analyze', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'X-Request-Id': reqId, // Pass request ID for server-side logging
+        },
         body: JSON.stringify({
           feedback: initialInput,
           project_id: project.id,
@@ -162,7 +234,8 @@ export default function ProjectOutputClient({
       })
 
       if (!response.ok) {
-        throw new Error('Analysis failed')
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(errorData.error || `Analysis failed with status ${response.status}`)
       }
 
       const result = await response.json()
@@ -172,13 +245,34 @@ export default function ProjectOutputClient({
       }
 
       // The API returns the result directly, not nested
-      setAnalysisResult(result.data || result)
+      const analysisData = result.data || result
+      setAnalysisResult(analysisData)
       setGenerationProgress('')
-      showToast('Analysis complete!', 'success')
+      
+      // Log which provider generated the output
+      const provider = analysisData.provider || result.provider || 'unknown'
+      console.log(`[PMCopilot] Analysis complete (${reqId})`, {
+        provider,
+        problemsCount: analysisData.problem_analysis?.length || 0,
+        featuresCount: analysisData.feature_system?.length || 0,
+        tasksCount: analysisData.development_tasks?.length || 0,
+      })
+      
+      showToast(`Analysis complete! (via ${provider})`, 'success')
+      
+      // Clean URL params after successful generation
+      cleanUrlParams()
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Analysis failed'
+      console.error(`[PMCopilot] Analysis error (${reqId}):`, message)
       setError(message)
       showToast(message, 'error')
+      // Allow retry on error
+      generationStartedRef.current = false
+      hasGeneratedRef.current = false // Allow retry
+      
+      // Still clean URL to prevent refresh re-trigger
+      cleanUrlParams()
     } finally {
       setIsGenerating(false)
     }
@@ -660,6 +754,40 @@ ${content
 
     if (!analysisResult) {
       return <EmptyState input={initialInput} onGenerate={handleGenerate} />
+    }
+
+    // Defensive check: ensure key data structures are arrays
+    const hasValidData = 
+      Array.isArray(analysisResult.problem_analysis) || 
+      Array.isArray(analysisResult.feature_system) || 
+      Array.isArray(analysisResult.development_tasks);
+    
+    if (!hasValidData) {
+      return (
+        <div className="flex items-center justify-center min-h-screen">
+          <div className="max-w-md p-8 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+            <div className="flex items-start gap-3">
+              <svg className="w-6 h-6 text-yellow-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <div>
+                <h3 className="font-semibold text-yellow-900 dark:text-yellow-100 mb-2">
+                  Analysis Data Processing
+                </h3>
+                <p className="text-sm text-yellow-800 dark:text-yellow-200 mb-4">
+                  The analysis data is being normalized. Please refresh the page in a moment or generate a new analysis.
+                </p>
+                <button
+                  onClick={() => window.location.reload()}
+                  className="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg text-sm font-medium transition-colors"
+                >
+                  Refresh Page
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
     }
 
     switch (activeSection) {

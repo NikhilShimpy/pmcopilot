@@ -51,7 +51,7 @@ function extractJSON(content: string): string {
   }
   cleaned = cleaned.trim();
 
-  // Try to find JSON object
+  // Try to find JSON object - No truncation, returns full match
   const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
   if (jsonMatch) {
     return jsonMatch[0];
@@ -59,13 +59,290 @@ function extractJSON(content: string): string {
   return cleaned;
 }
 
+// ============================================
+// JSON REPAIR FOR TRUNCATED RESPONSES
+// ============================================
+
+/**
+ * Repairs truncated JSON by auto-closing unclosed brackets/braces
+ * Handles cases where Gemini output is cut off before completing
+ */
+function repairTruncatedJSON(json: string): string {
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+  
+  for (let i = 0; i < json.length; i++) {
+    const char = json[i];
+    
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    
+    if (char === '\\' && inString) {
+      escaped = true;
+      continue;
+    }
+    
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+    
+    if (inString) continue;
+    
+    if (char === '{') {
+      stack.push('}');
+    } else if (char === '[') {
+      stack.push(']');
+    } else if (char === '}' || char === ']') {
+      if (stack.length > 0 && stack[stack.length - 1] === char) {
+        stack.pop();
+      }
+    }
+  }
+  
+  let repaired = json;
+  
+  // If we ended mid-string, close it
+  if (inString) {
+    repaired += '"';
+  }
+  
+  // Remove any trailing comma before closing
+  repaired = repaired.replace(/,\s*$/, '');
+  
+  // Append all unclosed brackets/braces in reverse order
+  while (stack.length > 0) {
+    repaired += stack.pop();
+  }
+  
+  return repaired;
+}
+
+// ============================================
+// DATA NORMALIZER FOR MULTI-PROVIDER SCHEMAS
+// ============================================
+
+/**
+ * Normalizes AI output to handle different schemas from Gemini vs Groq
+ * Ensures consistent array-based structure for problems, features, tasks
+ */
+function normalizeAIOutput(rawResult: any): any {
+  if (!rawResult) return rawResult;
+
+  const normalized = { ...rawResult };
+
+  // ==========================================
+  // NORMALIZE PROBLEMS
+  // ==========================================
+  if (rawResult.problem_analysis) {
+    const problems = rawResult.problem_analysis;
+    
+    // Case 1: Groq returns object with nested structure
+    if (!Array.isArray(problems) && typeof problems === 'object') {
+      const normalized Problems: any[] = [];
+      
+      // Extract primary_problem
+      if (problems.primary_problem) {
+        normalizedProblems.push({
+          id: 'PROB-001',
+          title: problems.primary_problem.title || problems.primary_problem || 'Primary Problem',
+          description: problems.primary_problem.description || problems.primary_problem,
+          deep_description: problems.primary_problem.deep_description || problems.primary_problem.description || '',
+          severity: problems.primary_problem.severity || 'high',
+          category: problems.primary_problem.category || 'Core',
+          affected_users: problems.primary_problem.affected_users || 'All users',
+          business_impact: problems.primary_problem.business_impact || problems.market_evidence || 'Significant impact',
+          root_cause: problems.primary_problem.root_cause || '',
+          current_solutions: problems.current_solutions || '',
+          consequence_of_inaction: problems.consequence_of_inaction || '',
+        });
+      }
+      
+      // Extract secondary_problems array
+      if (Array.isArray(problems.secondary_problems)) {
+        problems.secondary_problems.forEach((p: any, idx: number) => {
+          normalizedProblems.push({
+            id: `PROB-${String(idx + 2).padStart(3, '0')}`,
+            title: p.title || p.problem || p.name || `Problem ${idx + 2}`,
+            description: p.description || p.impact || p.details || String(p),
+            deep_description: p.deep_description || p.description || '',
+            severity: p.severity || 'medium',
+            category: p.category || 'Secondary',
+            affected_users: p.affected_users || 'Users',
+            business_impact: p.business_impact || p.impact || '',
+            root_cause: p.root_cause || '',
+          });
+        });
+      }
+      
+      normalized.problem_analysis = normalizedProblems;
+      logger.info('✅ Normalized problems from nested object to array', {
+        originalType: 'object',
+        normalizedCount: normalizedProblems.length
+      });
+    }
+    // Case 2: Array but wrong field names
+    else if (Array.isArray(problems)) {
+      normalized.problem_analysis = problems.map((p: any, idx: number) => ({
+        id: p.id || `PROB-${String(idx + 1).padStart(3, '0')}`,
+        title: p.title || p.problem || p.name || `Problem ${idx + 1}`,
+        description: p.description || p.impact || p.details || '',
+        deep_description: p.deep_description || p.description || '',
+        severity: p.severity || p.priority || 'medium',
+        category: p.category || p.type || 'General',
+        affected_users: p.affected_users || p.users || 'Users',
+        business_impact: p.business_impact || p.impact || '',
+        root_cause: p.root_cause || p.cause || '',
+      }));
+    }
+  }
+
+  // ==========================================
+  // NORMALIZE FEATURES
+  // ==========================================
+  if (rawResult.feature_system) {
+    const features = rawResult.feature_system;
+    
+    if (!Array.isArray(features) && typeof features === 'object') {
+      // Handle nested feature object
+      const normalizedFeatures: any[] = [];
+      
+      if (features.core_features && Array.isArray(features.core_features)) {
+        features.core_features.forEach((f: any, idx: number) => {
+          normalizedFeatures.push({
+            id: `FEAT-${String(idx + 1).padStart(3, '0')}`,
+            title: f.title || f.name || f.feature || `Feature ${idx + 1}`,
+            description: f.description || f.details || '',
+            priority: f.priority || 'high',
+            category: f.category || 'Core',
+            user_story: f.user_story || '',
+            acceptance_criteria: f.acceptance_criteria || [],
+            technical_requirements: f.technical_requirements || [],
+          });
+        });
+      }
+      
+      if (features.advanced_features && Array.isArray(features.advanced_features)) {
+        const offset = normalizedFeatures.length;
+        features.advanced_features.forEach((f: any, idx: number) => {
+          normalizedFeatures.push({
+            id: `FEAT-${String(offset + idx + 1).padStart(3, '0')}`,
+            title: f.title || f.name || f.feature || `Feature ${offset + idx + 1}`,
+            description: f.description || f.details || '',
+            priority: f.priority || 'medium',
+            category: f.category || 'Advanced',
+            user_story: f.user_story || '',
+            acceptance_criteria: f.acceptance_criteria || [],
+            technical_requirements: f.technical_requirements || [],
+          });
+        });
+      }
+      
+      normalized.feature_system = normalizedFeatures;
+      logger.info('✅ Normalized features from nested object to array', {
+        originalType: 'object',
+        normalizedCount: normalizedFeatures.length
+      });
+    }
+    else if (Array.isArray(features)) {
+      normalized.feature_system = features.map((f: any, idx: number) => ({
+        id: f.id || `FEAT-${String(idx + 1).padStart(3, '0')}`,
+        title: f.title || f.name || f.feature || `Feature ${idx + 1}`,
+        description: f.description || f.details || '',
+        priority: f.priority || 'medium',
+        category: f.category || 'General',
+        user_story: f.user_story || '',
+        acceptance_criteria: f.acceptance_criteria || [],
+        technical_requirements: f.technical_requirements || [],
+      }));
+    }
+  }
+
+  // ==========================================
+  // NORMALIZE TASKS
+  // ==========================================
+  if (rawResult.development_tasks) {
+    const tasks = rawResult.development_tasks;
+    
+    if (!Array.isArray(tasks) && typeof tasks === 'object') {
+      // Handle nested task object
+      const normalizedTasks: any[] = [];
+      
+      // Extract from various possible nested structures
+      const taskArrays = [
+        tasks.phase_1, tasks.phase_2, tasks.phase_3,
+        tasks.backend_tasks, tasks.frontend_tasks, tasks.infrastructure_tasks,
+        tasks.core_tasks, tasks.additional_tasks
+      ].filter(Boolean);
+      
+      let taskIndex = 1;
+      taskArrays.forEach((taskArray: any) => {
+        if (Array.isArray(taskArray)) {
+          taskArray.forEach((t: any) => {
+            normalizedTasks.push({
+              id: `TASK-${String(taskIndex++).padStart(3, '0')}`,
+              title: t.title || t.name || t.task || `Task ${taskIndex}`,
+              description: t.description || t.details || '',
+              priority: t.priority || 'medium',
+              category: t.category || 'Development',
+              estimated_hours: t.estimated_hours || t.hours || 0,
+              dependencies: t.dependencies || [],
+            });
+          });
+        }
+      });
+      
+      normalized.development_tasks = normalizedTasks;
+      logger.info('✅ Normalized tasks from nested object to array', {
+        originalType: 'object',
+        normalizedCount: normalizedTasks.length
+      });
+    }
+    else if (Array.isArray(tasks)) {
+      normalized.development_tasks = tasks.map((t: any, idx: number) => ({
+        id: t.id || `TASK-${String(idx + 1).padStart(3, '0')}`,
+        title: t.title || t.name || t.task || `Task ${idx + 1}`,
+        description: t.description || t.details || '',
+        priority: t.priority || 'medium',
+        category: t.category || 'Development',
+        estimated_hours: t.estimated_hours || t.hours || 0,
+        dependencies: t.dependencies || [],
+      }));
+    }
+  }
+
+  return normalized;
+}
+
 function safeParseJSON<T>(content: string, fallback: T): T {
+  const cleanedContent = extractJSON(content.trim());
+  
+  // First attempt: direct parse
   try {
-    const cleanedContent = extractJSON(content.trim());
     return JSON.parse(cleanedContent);
-  } catch (error) {
-    logger.warn('Failed to parse JSON', { error, content: content.substring(0, 200) });
-    return fallback;
+  } catch (firstError) {
+    // Second attempt: repair truncated JSON
+    try {
+      const repairedContent = repairTruncatedJSON(cleanedContent);
+      const result = JSON.parse(repairedContent);
+      logger.info('✅ JSON repair successful', {
+        originalLength: cleanedContent.length,
+        repairedLength: repairedContent.length,
+        addedChars: repairedContent.length - cleanedContent.length,
+      });
+      return result;
+    } catch (repairError) {
+      logger.warn('Failed to parse JSON even after repair attempt', {
+        firstError,
+        repairError,
+        contentPreview: content.substring(0, 200),
+        contentEnd: content.substring(Math.max(0, content.length - 100)),
+      });
+      return fallback;
+    }
   }
 }
 
@@ -1248,7 +1525,7 @@ Output ONLY valid JSON. Start NOW.`,
 
 export async function runComprehensiveStrategyAnalysis(
   rawFeedback: string,
-  context?: PipelineContext
+  context?: PipelineContext & { maxTokens?: number; timeout?: number }
 ): Promise<{
   success: boolean;
   result?: ComprehensiveStrategyResult;
@@ -1258,14 +1535,19 @@ export async function runComprehensiveStrategyAnalysis(
   const analysisStart = Date.now();
   const analysisId = `strategy-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 
-  logger.info('Starting Comprehensive Strategy Analysis', {
+  // Use provided timeout or default
+  const ANALYSIS_TIMEOUT = context?.timeout || 90000; // Default 90 seconds
+  const maxTokens = context?.maxTokens || AI_CONFIG.DEFAULT_MAX_TOKENS;
+  const depth = context?.depth || 'long';
+
+  logger.info('🚀 Starting Comprehensive Strategy Analysis', {
     analysisId,
     feedbackLength: rawFeedback.length,
     hasContext: !!context,
+    depth,
+    maxTokens,
+    timeout: ANALYSIS_TIMEOUT,
   });
-
-  // Set timeout to ensure reasonable response time
-  const ANALYSIS_TIMEOUT = 55000; // 55 seconds
 
   try {
     // Race between AI analysis and timeout
@@ -1274,19 +1556,36 @@ export async function runComprehensiveStrategyAnalysis(
       (async () => {
         const messages = getComprehensiveStrategyPrompt(rawFeedback, context);
 
+        logger.info('📤 Sending prompt to AI provider', {
+          systemPromptLength: messages[0]?.content?.length || 0,
+          userPromptLength: messages[1]?.content?.length || 0,
+          maxTokens,
+        });
+
         const { content, provider } = await callAI(messages, {
           temperature: 0.7,
-          max_tokens: AI_CONFIG.DEFAULT_MAX_TOKENS,
+          max_tokens: maxTokens,
           timeout: ANALYSIS_TIMEOUT - 5000, // Leave buffer
+        });
+
+        logger.info('📥 Received AI response', {
+          provider,
+          responseLength: content.length,
         });
 
         const rawResult = safeParseJSON<any>(content, null);
 
         if (!rawResult) {
+          logger.error('Failed to parse AI response as JSON', {
+            contentPreview: content.substring(0, 500),
+          });
           throw new Error('Failed to parse AI response as JSON');
         }
 
-        return { rawResult, provider };
+        // Normalize the output to handle different AI provider schemas
+        const normalizedResult = normalizeAIOutput(rawResult);
+
+        return { rawResult: normalizedResult, provider };
       })(),
 
       // Timeout fallback
@@ -1319,10 +1618,22 @@ export async function runComprehensiveStrategyAnalysis(
       logger.warn(`Only ${tasks.length} tasks generated (minimum 25 recommended)`);
     }
 
-    // If output is too minimal, use fallback
-    if (problems.length < 5 || features.length < 8 || tasks.length < 10) {
-      logger.warn('AI output too minimal, using fallback analysis');
-      throw new Error('Insufficient AI output quality');
+    // Only trigger fallback if response is COMPLETELY empty (all sections zero)
+    const totalOutputItems = (problems?.length ?? 0) + (features?.length ?? 0) + (tasks?.length ?? 0);
+    
+    if (totalOutputItems === 0) {
+      logger.warn('AI output completely empty, using fallback analysis');
+      throw new Error('No AI output generated');
+    } else if (totalOutputItems < 20) {
+      // Partial output - log warning but USE the real Gemini data
+      logger.warn('⚠️ Partial AI output detected, proceeding with available data', {
+        problems: problems?.length ?? 0,
+        features: features?.length ?? 0,
+        tasks: tasks?.length ?? 0,
+        total: totalOutputItems,
+        note: 'Using real AI output despite being below target minimums'
+      });
+      // Continue - do NOT trigger fallback for partial data
     }
 
     // Ensure IDs are set
@@ -1369,15 +1680,43 @@ export async function runComprehensiveStrategyAnalysis(
       provider: analysisResult.provider
     };
 
-  } catch (error) {
+  } catch (error: any) {
     const processingTime = Date.now() - analysisStart;
+    const errorMessage = error instanceof Error ? error.message : String(error);
+
+    // CHECK FOR CONFIG ERRORS - DO NOT GENERATE FALLBACK
+    // Check both the flag AND the error message pattern for robustness
+    const isConfigError = 
+      error.isConfigError === true || 
+      errorMessage.includes('GEMINI_CONFIG_ERROR') ||
+      errorMessage.includes('Model not found') ||
+      errorMessage.includes('Invalid API key') ||
+      errorMessage.includes('Permission denied') ||
+      errorMessage.includes('not found for API version');
+
+    if (isConfigError) {
+      logger.error('🚫 PROVIDER CONFIG ERROR - NOT USING FALLBACK', {
+        error: errorMessage,
+        processingTime,
+        hint: 'Fix the AI provider configuration. This is not a transient error.',
+        errorType: error.isConfigError ? 'flagged' : 'pattern-matched',
+      });
+      
+      // Return failure, not fallback
+      return {
+        success: false,
+        error: `AI Configuration Error: ${errorMessage}`,
+        provider: 'none',
+      };
+    }
 
     logger.warn('AI analysis failed, using fallback system', {
-      error: error instanceof Error ? error.message : 'Unknown error',
-      processingTime
+      error: errorMessage,
+      processingTime,
+      errorType: 'transient',
     });
 
-    // Generate fallback analysis
+    // Generate fallback analysis ONLY for transient errors
     const fallbackResult = generateFallbackAnalysis(rawFeedback);
 
     // Update metadata
