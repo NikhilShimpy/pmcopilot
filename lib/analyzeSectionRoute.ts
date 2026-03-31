@@ -13,6 +13,12 @@ import {
 import { DB_TABLES } from '@/utils/constants';
 import { isValidUUID } from '@/utils/helpers';
 import { CostIntakeSelections, StrategySectionId } from '@/types/comprehensive-strategy';
+import {
+  buildResultFromSections,
+  ensureAnalysisSession,
+  syncAnalysisSessionProgress,
+  upsertAnalysisSectionsFromResult,
+} from '@/lib/analysisSessionStore';
 
 type DeferredRouteSection = (typeof DEFERRED_STRATEGY_SECTIONS)[number];
 
@@ -285,27 +291,74 @@ export async function handleAnalyzeSectionRequest(
       );
     }
 
-    const { data: analysis, error } = await supabase
-      .from(DB_TABLES.ANALYSES)
-      .select('id, project_id, result, projects!inner(user_id)')
+    const { data: sessionRecord } = await supabase
+      .from('analysis_sessions')
+      .select('id, project_id, user_id, title, prompt, detail_level, metadata, legacy_analysis_id')
       .eq('id', analysisId)
-      .eq('projects.user_id', user.id)
-      .single();
+      .eq('user_id', user.id)
+      .maybeSingle();
 
-    if (error || !analysis) {
-      return new Response(
-        JSON.stringify({ success: false, error: 'Analysis not found or access denied' }),
+    let activeSessionId: string | null = null;
+    let legacyAnalysisId: string | null = null;
+    let activeProjectId: string | null = null;
+    let sessionPrompt = '';
+    let currentResult: PartialStrategyResult;
+
+    if (sessionRecord) {
+      activeSessionId = sessionRecord.id;
+      legacyAnalysisId = sessionRecord.legacy_analysis_id || null;
+      activeProjectId = sessionRecord.project_id;
+      sessionPrompt = sessionRecord.prompt || '';
+
+      const { data: sectionRows } = await supabase
+        .from('analysis_sections')
+        .select('section_id, content')
+        .eq('session_id', sessionRecord.id);
+
+      currentResult = buildResultFromSections(
+        sectionRows || [],
+        null,
         {
-          status: 404,
+          ...(sessionRecord.metadata || {}),
+          session_title: sessionRecord.title || (sessionRecord.metadata as any)?.session_title,
+        }
+      ) as PartialStrategyResult;
+    } else {
+      const { data: analysis, error } = await supabase
+        .from(DB_TABLES.ANALYSES)
+        .select('id, project_id, result, projects!inner(user_id)')
+        .eq('id', analysisId)
+        .eq('projects.user_id', user.id)
+        .single();
+
+      if (error || !analysis) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'Analysis not found or access denied' }),
+          {
+            status: 404,
+            headers: { 'Content-Type': 'application/json' },
+          }
+        );
+      }
+
+      legacyAnalysisId = analysis.id;
+      activeProjectId = analysis.project_id;
+      currentResult = (analysis.result || {}) as PartialStrategyResult;
+    }
+
+    if (!activeProjectId) {
+      return new Response(
+        JSON.stringify({ success: false, error: 'Project context missing for this analysis' }),
+        {
+          status: 400,
           headers: { 'Content-Type': 'application/json' },
         }
       );
     }
 
-    let currentResult = (analysis.result || {}) as PartialStrategyResult;
     if (!currentResult.metadata) {
       currentResult.metadata = {
-        analysis_id: analysisId,
+        analysis_id: activeSessionId || legacyAnalysisId || analysisId,
         created_at: new Date().toISOString(),
         processing_time_ms: 0,
         model_used: 'gemini',
@@ -322,7 +375,9 @@ export async function handleAnalyzeSectionRequest(
 
     const requestedFeedback =
       typeof body.feedback === 'string' ? normalizeInput(body.feedback) : '';
-    const storedFeedback = normalizeInput(currentResult.metadata?.source_input || '');
+    const storedFeedback = normalizeInput(
+      currentResult.metadata?.source_input || sessionPrompt || ''
+    );
     const rawFeedback = requestedFeedback || storedFeedback;
 
     if (!rawFeedback.trim()) {
@@ -343,6 +398,7 @@ export async function handleAnalyzeSectionRequest(
     const inputHash = getInputHash(rawFeedback);
     const existingInputHash = currentResult.metadata?.input_hash as string | undefined;
     const inputChanged = !!existingInputHash && existingInputHash !== inputHash;
+    const responseAnalysisId = activeSessionId || legacyAnalysisId || analysisId;
 
     if (inputChanged) {
       const previousGeneratedSections = Array.isArray(currentResult.metadata?.generated_sections)
@@ -401,7 +457,7 @@ export async function handleAnalyzeSectionRequest(
 
       return successResponse(
         buildSuccessPayload(
-          analysisId,
+          responseAnalysisId,
           section,
           currentResult.metadata?.section_providers?.[section] ||
             currentResult.metadata?.provider ||
@@ -432,7 +488,7 @@ export async function handleAnalyzeSectionRequest(
 
       return successResponse(
         buildSuccessPayload(
-          analysisId,
+          responseAnalysisId,
           section,
           currentResult.metadata?.section_providers?.[section] ||
             currentResult.metadata?.provider ||
@@ -457,7 +513,7 @@ export async function handleAnalyzeSectionRequest(
       rawFeedback,
       currentResult,
       {
-        project_id: analysis.project_id,
+        project_id: activeProjectId,
         project_name:
           (typeof body.context === 'object' &&
           body.context &&
@@ -493,7 +549,8 @@ export async function handleAnalyzeSectionRequest(
 
     generated.result.metadata = {
       ...generated.result.metadata,
-      saved_analysis_id: analysisId,
+      saved_analysis_id: responseAnalysisId,
+      session_id: activeSessionId || undefined,
       source_input: rawFeedback,
       input_hash: inputHash,
       project_name:
@@ -509,26 +566,109 @@ export async function handleAnalyzeSectionRequest(
       ).filter((stale: string) => stale !== section),
     };
 
-    const updated = await analysisEngineService.updateAnalysisResult(
-      supabase as any,
-      analysisId,
-      analysis.project_id,
-      generated.result
-    );
+    // Persist normalized analysis session + section rows.
+    try {
+      let sessionId = activeSessionId;
+      let sessionTitle =
+        (currentResult.metadata?.session_title as string | undefined) ||
+        (generated.result.metadata?.session_title as string | undefined) ||
+        undefined;
 
-    if (!updated) {
-      return new Response(
-        JSON.stringify({ success: false, error: 'Failed to persist generated section' }),
-        {
-          status: 500,
-          headers: { 'Content-Type': 'application/json' },
+      if (!sessionId) {
+        const session = await ensureAnalysisSession(supabase as any, {
+          userId: user.id,
+          projectId: activeProjectId,
+          projectName:
+            (typeof body.context === 'object' &&
+            body.context &&
+            typeof (body.context as any).project_name === 'string'
+              ? (body.context as any).project_name
+              : undefined) ||
+            (generated.result.metadata?.project_name as string) ||
+            'Untitled Project',
+          prompt: rawFeedback,
+          detailLevel:
+            (typeof body.detail_level === 'string' ? body.detail_level : undefined) ||
+            String(generated.result.metadata?.detail_level || 'long'),
+          provider: generated.provider,
+          model: String(generated.result.metadata?.model_used || 'gemini'),
+          result: generated.result as Record<string, any>,
+          legacyAnalysisId: legacyAnalysisId,
+        });
+
+        if (session?.id) {
+          sessionId = session.id;
+          sessionTitle = session.title;
         }
-      );
+      }
+
+      if (sessionId) {
+        await upsertAnalysisSectionsFromResult(supabase as any, {
+          sessionId,
+          userId: user.id,
+          projectId: activeProjectId,
+          result: generated.result as Record<string, any>,
+          provider: generated.provider,
+          model: String(generated.result.metadata?.model_used || 'gemini'),
+          inputHash,
+        });
+
+        await syncAnalysisSessionProgress(supabase as any, {
+          sessionId,
+          result: generated.result as Record<string, any>,
+          metadata: {
+            ...(generated.result.metadata || {}),
+            session_id: sessionId,
+            saved_analysis_id: sessionId,
+            session_title:
+              sessionTitle ||
+              (generated.result.metadata?.session_title as string | undefined) ||
+              undefined,
+          },
+        });
+
+        generated.result.metadata = {
+          ...generated.result.metadata,
+          session_id: sessionId,
+          saved_analysis_id: sessionId,
+          session_title:
+            sessionTitle ||
+            (generated.result.metadata?.session_title as string | undefined) ||
+            undefined,
+        };
+      } else if (legacyAnalysisId) {
+        const updated = await analysisEngineService.updateAnalysisResult(
+          supabase as any,
+          legacyAnalysisId,
+          activeProjectId,
+          generated.result
+        );
+
+        if (!updated) {
+          return new Response(
+            JSON.stringify({ success: false, error: 'Failed to persist generated section' }),
+            {
+              status: 500,
+              headers: { 'Content-Type': 'application/json' },
+            }
+          );
+        }
+      }
+    } catch (sessionPersistError) {
+      logger.warn('Structured analysis session persistence skipped', {
+        requestId,
+        analysisId,
+        section,
+        error:
+          sessionPersistError instanceof Error
+            ? sessionPersistError.message
+            : 'Unknown session persistence error',
+      });
     }
 
     return successResponse(
       buildSuccessPayload(
-        analysisId,
+        generated.result.metadata?.session_id || responseAnalysisId,
         section,
         generated.provider,
         generated.result,

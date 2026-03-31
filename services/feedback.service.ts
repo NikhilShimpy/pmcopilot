@@ -1,5 +1,12 @@
 import { SupabaseClient } from '@supabase/supabase-js';
-import { Feedback, CreateFeedbackRequest, User } from '@/types';
+import {
+  Feedback,
+  CreateFeedbackRequest,
+  FeedbackCategory,
+  FeedbackPriority,
+  FeedbackStatus,
+  User,
+} from '@/types';
 import { logger } from '@/lib/logger';
 import {
   throwValidationError,
@@ -14,6 +21,29 @@ import { projectService } from './project.service';
  * Service for feedback-related operations
  */
 export class FeedbackService {
+  private readonly allowedCategories: FeedbackCategory[] = [
+    'bug',
+    'feature',
+    'improvement',
+    'ux',
+    'performance',
+    'other',
+  ];
+
+  private readonly allowedPriorities: FeedbackPriority[] = [
+    'low',
+    'medium',
+    'high',
+    'critical',
+  ];
+
+  private readonly allowedStatuses: FeedbackStatus[] = [
+    'new',
+    'reviewed',
+    'planned',
+    'done',
+  ];
+
   /**
    * Create new feedback
    */
@@ -36,9 +66,17 @@ export class FeedbackService {
     // Sanitize input
     const sanitizedData = {
       project_id: data.project_id,
+      title: data.title ? sanitizeInput(data.title) : null,
       content: sanitizeInput(data.content),
-      source: data.source ? sanitizeInput(data.source) : null,
-      metadata: data.metadata || null,
+      category: data.category || 'other',
+      priority: data.priority || 'medium',
+      status: data.status || 'new',
+      internal_notes: data.internal_notes
+        ? sanitizeInput(data.internal_notes)
+        : null,
+      source: data.source ? sanitizeInput(data.source) : 'manual',
+      created_by: user.id,
+      metadata: data.metadata || {},
     };
 
     try {
@@ -87,9 +125,10 @@ export class FeedbackService {
       }
 
       // Remove the projects join data
-      const { projects, ...feedbackData } = feedback as any;
+      const feedbackData = { ...(feedback as Record<string, unknown>) };
+      delete (feedbackData as Record<string, unknown>).projects;
 
-      return feedbackData as Feedback;
+      return feedbackData as unknown as Feedback;
     } catch (error) {
       logger.error('Error fetching feedback', {
         error: error instanceof Error ? error.message : 'Unknown error',
@@ -108,9 +147,12 @@ export class FeedbackService {
     options: {
       limit?: number;
       offset?: number;
+      status?: FeedbackStatus;
+      priority?: FeedbackPriority;
+      search?: string;
     } = {}
   ): Promise<{ feedback: Feedback[]; total: number }> {
-    const { limit = 20, offset = 0 } = options;
+    const { limit = 20, offset = 0, status, priority, search } = options;
 
     logger.debug('Fetching project feedback', {
       projectId,
@@ -124,10 +166,24 @@ export class FeedbackService {
 
     try {
       // Get total count
-      const { count, error: countError } = await supabase
+      let countQuery = supabase
         .from(DB_TABLES.FEEDBACK)
         .select('*', { count: 'exact', head: true })
         .eq('project_id', projectId);
+
+      if (status) {
+        countQuery = countQuery.eq('status', status);
+      }
+      if (priority) {
+        countQuery = countQuery.eq('priority', priority);
+      }
+      if (search) {
+        countQuery = countQuery.or(
+          `content.ilike.%${search}%,title.ilike.%${search}%`
+        );
+      }
+
+      const { count, error: countError } = await countQuery;
 
       if (countError) {
         logger.error('Failed to count feedback', { error: countError.message });
@@ -135,12 +191,26 @@ export class FeedbackService {
       }
 
       // Get feedback
-      const { data: feedback, error } = await supabase
+      let feedbackQuery = supabase
         .from(DB_TABLES.FEEDBACK)
         .select('*')
         .eq('project_id', projectId)
         .order('created_at', { ascending: false })
         .range(offset, offset + limit - 1);
+
+      if (status) {
+        feedbackQuery = feedbackQuery.eq('status', status);
+      }
+      if (priority) {
+        feedbackQuery = feedbackQuery.eq('priority', priority);
+      }
+      if (search) {
+        feedbackQuery = feedbackQuery.or(
+          `content.ilike.%${search}%,title.ilike.%${search}%`
+        );
+      }
+
+      const { data: feedback, error } = await feedbackQuery;
 
       if (error) {
         logger.error('Failed to fetch feedback', { error: error.message });
@@ -174,18 +244,39 @@ export class FeedbackService {
     options: {
       limit?: number;
       offset?: number;
+      status?: FeedbackStatus;
+      priority?: FeedbackPriority;
+      search?: string;
+      projectId?: string;
     } = {}
   ): Promise<{ feedback: Feedback[]; total: number }> {
-    const { limit = 20, offset = 0 } = options;
+    const { limit = 20, offset = 0, status, priority, search, projectId } = options;
 
     logger.debug('Fetching user feedback', { userId: user.id, limit, offset });
 
     try {
       // Get total count
-      const { count, error: countError } = await supabase
+      let countQuery = supabase
         .from(DB_TABLES.FEEDBACK)
         .select('*, projects!inner(user_id)', { count: 'exact', head: true })
         .eq('projects.user_id', user.id);
+
+      if (status) {
+        countQuery = countQuery.eq('status', status);
+      }
+      if (priority) {
+        countQuery = countQuery.eq('priority', priority);
+      }
+      if (projectId) {
+        countQuery = countQuery.eq('project_id', projectId);
+      }
+      if (search) {
+        countQuery = countQuery.or(
+          `content.ilike.%${search}%,title.ilike.%${search}%`
+        );
+      }
+
+      const { count, error: countError } = await countQuery;
 
       if (countError) {
         logger.error('Failed to count feedback', { error: countError.message });
@@ -193,12 +284,29 @@ export class FeedbackService {
       }
 
       // Get feedback
-      const { data: feedback, error } = await supabase
+      let feedbackQuery = supabase
         .from(DB_TABLES.FEEDBACK)
         .select('*, projects!inner(user_id)')
         .eq('projects.user_id', user.id)
         .order('created_at', { ascending: false })
         .range(offset, offset + limit - 1);
+
+      if (status) {
+        feedbackQuery = feedbackQuery.eq('status', status);
+      }
+      if (priority) {
+        feedbackQuery = feedbackQuery.eq('priority', priority);
+      }
+      if (projectId) {
+        feedbackQuery = feedbackQuery.eq('project_id', projectId);
+      }
+      if (search) {
+        feedbackQuery = feedbackQuery.or(
+          `content.ilike.%${search}%,title.ilike.%${search}%`
+        );
+      }
+
+      const { data: feedback, error } = await feedbackQuery;
 
       if (error) {
         logger.error('Failed to fetch feedback', { error: error.message });
@@ -207,8 +315,11 @@ export class FeedbackService {
 
       // Remove the projects join data
       const cleanedFeedback =
-        feedback?.map(({ projects, ...feedbackData }: any) => feedbackData) ||
-        [];
+        feedback?.map((item) => {
+          const feedbackData = { ...(item as Record<string, unknown>) };
+          delete feedbackData.projects;
+          return feedbackData;
+        }) || [];
 
       logger.info('User feedback fetched successfully', {
         userId: user.id,
@@ -217,7 +328,7 @@ export class FeedbackService {
       });
 
       return {
-        feedback: cleanedFeedback as Feedback[],
+        feedback: cleanedFeedback as unknown as Feedback[],
         total: count || 0,
       };
     } catch (error) {
@@ -262,17 +373,130 @@ export class FeedbackService {
   }
 
   /**
+   * Update feedback details/status
+   */
+  async updateFeedback(
+    supabase: SupabaseClient,
+    user: User,
+    feedbackId: string,
+    updates: Partial<CreateFeedbackRequest> & {
+      status?: FeedbackStatus;
+      internal_notes?: string;
+    }
+  ): Promise<Feedback> {
+    logger.info('Updating feedback', { feedbackId, userId: user.id });
+
+    await this.getFeedbackById(supabase, user, feedbackId);
+
+    const updatePayload: Record<string, unknown> = {
+      updated_at: new Date().toISOString(),
+    };
+
+    if (updates.title !== undefined) {
+      updatePayload.title = updates.title ? sanitizeInput(updates.title) : null;
+    }
+    if (updates.content !== undefined) {
+      updatePayload.content = sanitizeInput(updates.content);
+    }
+    if (updates.category !== undefined) {
+      updatePayload.category = updates.category;
+    }
+    if (updates.priority !== undefined) {
+      updatePayload.priority = updates.priority;
+    }
+    if (updates.status !== undefined) {
+      updatePayload.status = updates.status;
+    }
+    if (updates.internal_notes !== undefined) {
+      updatePayload.internal_notes = updates.internal_notes
+        ? sanitizeInput(updates.internal_notes)
+        : null;
+    }
+    if (updates.source !== undefined) {
+      updatePayload.source = updates.source || 'manual';
+    }
+    if (updates.metadata !== undefined) {
+      updatePayload.metadata = updates.metadata || {};
+    }
+
+    this.validateFeedbackData(
+      {
+        project_id: '',
+        content:
+          typeof updatePayload.content === 'string'
+            ? updatePayload.content
+            : 'existing',
+        category: updatePayload.category as FeedbackCategory | undefined,
+        priority: updatePayload.priority as FeedbackPriority | undefined,
+        status: updatePayload.status as FeedbackStatus | undefined,
+        source: updatePayload.source as string | undefined,
+      } as CreateFeedbackRequest,
+      {
+        requireProjectId: false,
+        requireContent: false,
+      }
+    );
+
+    const { data, error } = await supabase
+      .from(DB_TABLES.FEEDBACK)
+      .update(updatePayload)
+      .eq('id', feedbackId)
+      .select()
+      .single();
+
+    if (error || !data) {
+      throwDatabaseError('Failed to update feedback', error);
+    }
+
+    return data as Feedback;
+  }
+
+  /**
    * Validate feedback data
    */
-  private validateFeedbackData(data: CreateFeedbackRequest): void {
-    if (!data.project_id) {
+  private validateFeedbackData(
+    data: CreateFeedbackRequest,
+    options: {
+      requireProjectId?: boolean;
+      requireContent?: boolean;
+    } = {}
+  ): void {
+    const requireProjectId = options.requireProjectId ?? true;
+    const requireContent = options.requireContent ?? true;
+
+    if (requireProjectId && !data.project_id) {
       throwValidationError('Project ID is required');
     }
 
-    if (!data.content || !isValidFeedbackContent(data.content)) {
+    if (data.content && !isValidFeedbackContent(data.content)) {
       throwValidationError(
         `Feedback content must be between ${VALIDATION.FEEDBACK_CONTENT.MIN_LENGTH} and ${VALIDATION.FEEDBACK_CONTENT.MAX_LENGTH} characters`
       );
+    }
+
+    if (requireContent && !data.content) {
+      throwValidationError('Feedback content is required');
+    }
+
+    if (
+      data.category &&
+      !this.allowedCategories.includes(data.category as FeedbackCategory)
+    ) {
+      throwValidationError('Invalid feedback category');
+    }
+
+    if (
+      data.priority &&
+      !this.allowedPriorities.includes(data.priority as FeedbackPriority)
+    ) {
+      throwValidationError('Invalid feedback priority');
+    }
+
+    if (
+      data.status &&
+      !this.allowedStatuses.includes(data.status as FeedbackStatus)
+    ) {
+      throwValidationError('Invalid feedback status');
     }
   }
 }

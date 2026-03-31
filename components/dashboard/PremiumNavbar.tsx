@@ -18,6 +18,7 @@ import {
   Keyboard,
 } from 'lucide-react'
 import type { Project } from '@/types'
+import { useAuth } from '@/hooks/useAuth'
 
 interface PremiumNavbarProps {
   user: {
@@ -38,9 +39,12 @@ export default function PremiumNavbar({
   onCreateProject,
 }: PremiumNavbarProps) {
   const router = useRouter()
+  const { signOut } = useAuth()
   const [showSearch, setShowSearch] = useState(false)
   const [showUserMenu, setShowUserMenu] = useState(false)
   const [showNotifications, setShowNotifications] = useState(false)
+  const [isSigningOut, setIsSigningOut] = useState(false)
+  const [showShortcutHints, setShowShortcutHints] = useState(true)
   const searchInputRef = useRef<HTMLInputElement>(null)
 
   const filteredProjects = searchQuery.trim()
@@ -66,7 +70,33 @@ export default function PremiumNavbar({
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [])
 
+  useEffect(() => {
+    const fetchShortcutPreference = async () => {
+      try {
+        const response = await fetch('/api/settings')
+        const payload = await response.json()
+        if (response.ok && payload.success) {
+          setShowShortcutHints(payload.data?.shortcut_hints_enabled !== false)
+        }
+      } catch {
+        // Keep default in case preferences are unavailable.
+      }
+    }
+
+    fetchShortcutPreference()
+  }, [])
+
   const userInitials = user.email?.slice(0, 2).toUpperCase() || 'U'
+
+  const handleSignOut = async () => {
+    setIsSigningOut(true)
+    const result = await signOut()
+    if (result.success) {
+      router.push('/login')
+      return
+    }
+    setIsSigningOut(false)
+  }
 
   return (
     <>
@@ -87,13 +117,15 @@ export default function PremiumNavbar({
             >
               <Search className="w-4 h-4" />
               <span className="text-sm">Search projects...</span>
-              <div className="flex items-center gap-1 px-2 py-0.5 rounded-md
-                bg-gray-200 dark:bg-gray-700
-                text-xs text-gray-500 dark:text-gray-400
-                border border-gray-300 dark:border-gray-600">
-                <Command className="w-3 h-3" />
-                <span>K</span>
-              </div>
+              {showShortcutHints && (
+                <div className="flex items-center gap-1 px-2 py-0.5 rounded-md
+                  bg-gray-200 dark:bg-gray-700
+                  text-xs text-gray-500 dark:text-gray-400
+                  border border-gray-300 dark:border-gray-600">
+                  <Command className="w-3 h-3" />
+                  <span>K</span>
+                </div>
+              )}
             </button>
           </div>
 
@@ -217,7 +249,7 @@ export default function PremiumNavbar({
                       {/* Menu Items */}
                       <div className="p-2">
                         <Link
-                          href="/dashboard"
+                          href="/profile"
                           className="flex items-center gap-3 px-4 py-3 rounded-xl
                             text-gray-700 dark:text-gray-300
                             hover:bg-gray-100 dark:hover:bg-gray-700/50
@@ -227,7 +259,7 @@ export default function PremiumNavbar({
                           <span className="text-sm">Profile</span>
                         </Link>
                         <Link
-                          href="/dashboard"
+                          href="/settings"
                           className="flex items-center gap-3 px-4 py-3 rounded-xl
                             text-gray-700 dark:text-gray-300
                             hover:bg-gray-100 dark:hover:bg-gray-700/50
@@ -237,7 +269,7 @@ export default function PremiumNavbar({
                           <span className="text-sm">Settings</span>
                         </Link>
                         <Link
-                          href="/dashboard"
+                          href="/shortcuts"
                           className="flex items-center gap-3 px-4 py-3 rounded-xl
                             text-gray-700 dark:text-gray-300
                             hover:bg-gray-100 dark:hover:bg-gray-700/50
@@ -247,7 +279,7 @@ export default function PremiumNavbar({
                           <span className="text-sm">Shortcuts</span>
                         </Link>
                         <Link
-                          href="/dashboard"
+                          href="/support"
                           className="flex items-center gap-3 px-4 py-3 rounded-xl
                             text-gray-700 dark:text-gray-300
                             hover:bg-gray-100 dark:hover:bg-gray-700/50
@@ -260,18 +292,18 @@ export default function PremiumNavbar({
 
                       {/* Logout */}
                       <div className="p-2 border-t border-gray-200 dark:border-gray-700">
-                        <form action="/auth/signout" method="POST">
-                          <button
-                            type="submit"
-                            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl
-                              text-red-600 dark:text-red-400
-                              hover:bg-red-50 dark:hover:bg-red-500/10
-                              transition-colors"
-                          >
-                            <LogOut className="w-4 h-4" />
-                            <span className="text-sm">Sign Out</span>
-                          </button>
-                        </form>
+                        <button
+                          type="button"
+                          onClick={handleSignOut}
+                          disabled={isSigningOut}
+                          className="w-full flex items-center gap-3 px-4 py-3 rounded-xl
+                            text-red-600 dark:text-red-400
+                            hover:bg-red-50 dark:hover:bg-red-500/10
+                            transition-colors disabled:opacity-50"
+                        >
+                          <LogOut className="w-4 h-4" />
+                          <span className="text-sm">{isSigningOut ? 'Signing out...' : 'Sign Out'}</span>
+                        </button>
                       </div>
                     </motion.div>
                   </>
@@ -356,6 +388,10 @@ export default function PremiumNavbar({
                         hover:bg-gray-100 dark:hover:bg-gray-700
                         text-gray-700 dark:text-gray-300
                         transition-colors text-left"
+                      onClick={() => {
+                        setShowSearch(false)
+                        router.push('/analysis')
+                      }}
                     >
                       <div className="w-10 h-10 rounded-xl bg-purple-100 dark:bg-purple-900/30
                         flex items-center justify-center">

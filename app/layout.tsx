@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import Script from 'next/script';
 import './globals.css';
 import { AuthProvider } from '@/hooks/useAuth';
 import { ToastProvider } from '@/components/ui/Toast';
@@ -16,12 +15,16 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <head>
-        <Script id="pmcopilot-theme-init" strategy="beforeInteractive">
-          {`(function(){try{var stored=localStorage.getItem('pmcopilot-theme');var prefersDark=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches;var useDark=stored?stored==='dark':prefersDark;document.documentElement.classList.toggle('dark',useDark);}catch(e){}})();`}
-        </Script>
-      </head>
+      <html lang="en" suppressHydrationWarning>
+        <head>
+          <script
+            id="pmcopilot-theme-init"
+            dangerouslySetInnerHTML={{
+              __html:
+                "(function(){try{var stored=localStorage.getItem('pmcopilot-theme');var prefersDark=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches;var useDark=stored?stored==='dark':prefersDark;document.documentElement.classList.toggle('dark',useDark);}catch(e){}})();",
+            }}
+          />
+        </head>
       <body className="antialiased bg-background text-foreground">
         <AuthProvider>
           <ToastProvider>{children}</ToastProvider>

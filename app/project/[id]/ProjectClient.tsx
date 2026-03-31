@@ -17,19 +17,17 @@ import {
   ArrowLeft,
   Edit2,
   Trash2,
-  Sparkles,
   Loader2,
-  Settings,
   Share2,
   Download,
 } from 'lucide-react'
 import { useToast } from '@/components/ui/Toast'
 import { createClientSupabaseClient } from '@/lib/supabase/client'
 import { ChatFirstLayout, DragDropProvider } from '@/components/chat-first'
-import { AnalysisProgressIndicator } from '@/components/AnalysisProgressIndicator'
 import { useChatFirstStore } from '@/stores/chatFirstStore'
 import type { Project } from '@/types'
 import type { ComprehensiveStrategyResult } from '@/types/comprehensive-strategy'
+import { DashboardSkeletonGrid } from '@/components/ui/SkeletonLoaders'
 
 interface ProjectClientProps {
   project: Project
@@ -48,16 +46,11 @@ export default function ProjectClient({ project: initialProject, user }: Project
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [loadingAnalysis, setLoadingAnalysis] = useState(true)
-  const [hasExistingAnalysis, setHasExistingAnalysis] = useState(false)
 
   // Chat-First Store - CRITICAL: This connects to the new UI
   const {
     setProject: setStoreProject,
     addMessage,
-    setStreamingPhase,
-    setThinkingMessage,
-    setError,
-    clearMessages,
   } = useChatFirstStore()
 
   // Track if we've already set the project
@@ -243,8 +236,6 @@ You can:
           const latestAnalysis = analyses[0]
           console.log('[ProjectClient] Found existing analysis:', latestAnalysis.id)
 
-          setHasExistingAnalysis(true)
-
           // CRITICAL: Add analysis result to chat messages
           if (latestAnalysis.result) {
             const chatContent = convertAnalysisToChat(latestAnalysis.result)
@@ -336,25 +327,62 @@ You can:
     }
   }
 
+  const handleShare = async () => {
+    const shareUrl =
+      typeof window !== 'undefined'
+        ? `${window.location.origin}/project/${project.id}`
+        : `/project/${project.id}`
+
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(shareUrl)
+        showToast('Project link copied to clipboard', 'success')
+        return
+      }
+
+      showToast('Clipboard is unavailable in this browser', 'warning')
+    } catch {
+      showToast('Failed to copy project link', 'error')
+    }
+  }
+
+  const handleExport = () => {
+    try {
+      const payload = {
+        id: project.id,
+        name: project.name,
+        description: project.description || null,
+        created_at: project.created_at,
+        updated_at: project.updated_at || null,
+      }
+
+      const json = JSON.stringify(payload, null, 2)
+      const blob = new Blob([json], { type: 'application/json;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = `${project.name.replace(/[^a-z0-9-_]+/gi, '-').toLowerCase() || 'project'}.json`
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      URL.revokeObjectURL(url)
+
+      showToast('Project exported as JSON', 'success')
+    } catch {
+      showToast('Failed to export project', 'error')
+    }
+  }
+
   // Loading state
   if (loadingAnalysis) {
     return (
-      <div className="h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-950">
-        <motion.div
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="text-center"
-        >
-          <motion.div
-            animate={{ rotate: 360 }}
-            transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
-            className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center shadow-xl shadow-blue-500/30"
-          >
-            <Sparkles className="w-8 h-8 text-white" />
-          </motion.div>
-          <p className="text-gray-600 dark:text-gray-400 font-medium">
-            Loading workspace...
-          </p>
+      <div className="min-h-screen bg-gradient-to-br from-gray-950 via-gray-950 to-gray-900 p-6">
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="max-w-7xl mx-auto space-y-5">
+          <div className="rounded-2xl border border-gray-800 bg-gray-900/80 p-5">
+            <div className="h-6 w-56 rounded bg-gray-800 animate-pulse" />
+            <div className="h-4 w-80 rounded bg-gray-800/80 animate-pulse mt-2" />
+          </div>
+          <DashboardSkeletonGrid count={6} />
         </motion.div>
       </div>
     )
@@ -392,6 +420,7 @@ You can:
           </button>
 
           <button
+            onClick={handleShare}
             className="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200
               hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
             title="Share"
@@ -400,6 +429,7 @@ You can:
           </button>
 
           <button
+            onClick={handleExport}
             className="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200
               hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
             title="Export"

@@ -1,120 +1,183 @@
-/**
- * PMCopilot - Individual Analysis API
- *
- * GET /api/analyze/[id] - Get specific analysis by ID
- * DELETE /api/analyze/[id] - Delete analysis
- */
-
-import { NextRequest } from 'next/server';
-import { supabase, requireAuth } from '@/lib/supabaseClient';
-import { logger } from '@/lib/logger';
+import { NextRequest } from 'next/server'
+import { createServerSupabaseClient, requireServerAuth } from '@/lib/supabase/server'
+import { logger } from '@/lib/logger'
 import {
   handleError,
   successResponse,
-  throwValidationError,
   throwNotFoundError,
-} from '@/lib/errorHandler';
-import { analysisEngineService } from '@/services/analysis-engine.service';
-import { DB_TABLES } from '@/utils/constants';
-import { isValidUUID } from '@/utils/helpers';
+  throwValidationError,
+} from '@/lib/errorHandler'
+import { buildResultFromSections } from '@/lib/analysisSessionStore'
+import { DB_TABLES } from '@/utils/constants'
+import { isValidUUID } from '@/utils/helpers'
 
 interface RouteParams {
-  params: Promise<{ id: string }>;
+  params: Promise<{ id: string }>
 }
 
-/**
- * GET /api/analyze/[id]
- * Get full analysis details
- */
 export async function GET(request: NextRequest, { params }: RouteParams) {
+  const { id } = await params
+
   try {
-    const { id } = await params;
+    logger.apiRequest('GET', `/api/analyze/${id}`)
 
-    logger.apiRequest('GET', `/api/analyze/${id}`);
-
-    // Validate ID
     if (!isValidUUID(id)) {
-      throwValidationError('Invalid analysis ID format');
+      throwValidationError('Invalid analysis ID format')
     }
 
-    // Require authentication
-    const user = await requireAuth(supabase);
+    const supabase = await createServerSupabaseClient()
+    const user = await requireServerAuth()
 
-    // Fetch analysis with project ownership check
-    const result = await analysisEngineService.getAnalysisById(supabase, user.id, id);
+    const { data: session } = await supabase
+      .from('analysis_sessions')
+      .select(
+        'id, project_id, title, prompt, detail_level, completion_percentage, generated_sections, metadata, legacy_analysis_id, created_at, updated_at'
+      )
+      .eq('id', id)
+      .eq('user_id', user.id)
+      .maybeSingle()
 
-    if (!result) {
-      throwNotFoundError('Analysis not found or access denied');
+    if (session) {
+      const [{ data: sectionRows }, { data: legacyAnalysis }] = await Promise.all([
+        supabase
+          .from('analysis_sections')
+          .select('section_id, content')
+          .eq('session_id', session.id),
+        session.legacy_analysis_id
+          ? supabase
+              .from('analyses')
+              .select('id, result')
+              .eq('id', session.legacy_analysis_id)
+              .maybeSingle()
+          : Promise.resolve({ data: null as any }),
+      ])
+
+      const result = buildResultFromSections(
+        sectionRows || [],
+        legacyAnalysis?.result || null,
+        session.metadata || {}
+      )
+
+      const hydratedResult = {
+        ...result,
+        metadata: {
+          ...(result.metadata || {}),
+          saved_analysis_id: session.id,
+          session_id: session.id,
+          session_title: session.title,
+          source_input: session.prompt,
+          detail_level: session.detail_level || result.metadata?.detail_level || 'long',
+        },
+      }
+
+      return successResponse({
+        id: session.id,
+        session_id: session.id,
+        project_id: session.project_id,
+        title: session.title,
+        prompt: session.prompt,
+        completion_percentage: session.completion_percentage || 0,
+        generated_sections: session.generated_sections || [],
+        db_created_at: session.created_at,
+        db_updated_at: session.updated_at || session.created_at,
+        result: hydratedResult,
+        ...hydratedResult,
+      })
     }
 
-    logger.apiResponse('GET', `/api/analyze/${id}`, 200, {
-      analysisId: id,
-    });
+    const { data: analysis } = await supabase
+      .from(DB_TABLES.ANALYSES)
+      .select('id, project_id, result, created_at, projects!inner(user_id)')
+      .eq('id', id)
+      .eq('projects.user_id', user.id)
+      .maybeSingle()
+
+    if (!analysis) {
+      throwNotFoundError('Analysis not found or access denied')
+    }
 
     return successResponse({
-      id: result.analysis.id,
-      project_id: result.analysis.project_id,
-      db_created_at: result.analysis.created_at,
-      ...result.result,
-    });
+      id: analysis.id,
+      session_id: analysis.id,
+      project_id: analysis.project_id,
+      db_created_at: analysis.created_at,
+      result: analysis.result,
+      ...(analysis.result || {}),
+    })
   } catch (error) {
-    const { id } = await params;
-    logger.apiResponse('GET', `/api/analyze/${id}`, 500);
-    return handleError(error);
+    logger.apiResponse('GET', `/api/analyze/${id}`, 500)
+    return handleError(error)
   }
 }
 
-/**
- * DELETE /api/analyze/[id]
- * Delete an analysis
- */
 export async function DELETE(request: NextRequest, { params }: RouteParams) {
+  const { id } = await params
+
   try {
-    const { id } = await params;
+    logger.apiRequest('DELETE', `/api/analyze/${id}`)
 
-    logger.apiRequest('DELETE', `/api/analyze/${id}`);
-
-    // Validate ID
     if (!isValidUUID(id)) {
-      throwValidationError('Invalid analysis ID format');
+      throwValidationError('Invalid analysis ID format')
     }
 
-    // Require authentication
-    const user = await requireAuth(supabase);
+    const supabase = await createServerSupabaseClient()
+    const user = await requireServerAuth()
 
-    // Verify ownership before delete
-    const { data: analysis, error: fetchError } = await supabase
+    const { data: session } = await supabase
+      .from('analysis_sessions')
+      .select('id, user_id, legacy_analysis_id')
+      .eq('id', id)
+      .eq('user_id', user.id)
+      .maybeSingle()
+
+    if (session) {
+      const { error: deleteSessionError } = await supabase
+        .from('analysis_sessions')
+        .delete()
+        .eq('id', session.id)
+        .eq('user_id', user.id)
+
+      if (deleteSessionError) {
+        throw deleteSessionError
+      }
+
+      if (session.legacy_analysis_id) {
+        const { count: linkedCount } = await supabase
+          .from('analysis_sessions')
+          .select('id', { count: 'exact', head: true })
+          .eq('legacy_analysis_id', session.legacy_analysis_id)
+
+        if (!linkedCount || linkedCount === 0) {
+          await supabase.from('analyses').delete().eq('id', session.legacy_analysis_id)
+        }
+      }
+
+      return successResponse({ deleted: true, id: session.id }, 'Analysis deleted successfully')
+    }
+
+    const { data: legacyAnalysis } = await supabase
       .from(DB_TABLES.ANALYSES)
       .select('id, projects!inner(user_id)')
       .eq('id', id)
       .eq('projects.user_id', user.id)
-      .single();
+      .maybeSingle()
 
-    if (fetchError || !analysis) {
-      throwNotFoundError('Analysis not found or access denied');
+    if (!legacyAnalysis) {
+      throwNotFoundError('Analysis not found or access denied')
     }
 
-    // Delete analysis
-    const { error: deleteError } = await supabase
+    const { error: deleteLegacyError } = await supabase
       .from(DB_TABLES.ANALYSES)
       .delete()
-      .eq('id', id);
+      .eq('id', id)
 
-    if (deleteError) {
-      logger.error('Failed to delete analysis', { error: deleteError.message });
-      throw deleteError;
+    if (deleteLegacyError) {
+      throw deleteLegacyError
     }
 
-    logger.apiResponse('DELETE', `/api/analyze/${id}`, 200);
-
-    return successResponse(
-      { deleted: true, id },
-      'Analysis deleted successfully',
-      200
-    );
+    return successResponse({ deleted: true, id }, 'Analysis deleted successfully')
   } catch (error) {
-    const { id } = await params;
-    logger.apiResponse('DELETE', `/api/analyze/${id}`, 500);
-    return handleError(error);
+    logger.apiResponse('DELETE', `/api/analyze/${id}`, 500)
+    return handleError(error)
   }
 }

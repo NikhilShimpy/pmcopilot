@@ -14,10 +14,17 @@ export interface Project {
 export interface Feedback {
   id: string;
   project_id: string;
+  title?: string | null;
   content: string;
+  category?: FeedbackCategory;
+  priority?: FeedbackPriority;
+  status?: FeedbackStatus;
+  internal_notes?: string | null;
+  created_by?: string | null;
   source?: string;
   metadata?: Record<string, any>;
   created_at: string;
+  updated_at?: string;
 }
 
 export interface Analysis {
@@ -115,9 +122,76 @@ export interface CreateProjectRequest {
 
 export interface CreateFeedbackRequest {
   project_id: string;
+  title?: string;
   content: string;
+  category?: FeedbackCategory;
+  priority?: FeedbackPriority;
+  status?: FeedbackStatus;
+  internal_notes?: string;
   source?: string;
   metadata?: Record<string, any>;
+}
+
+export type FeedbackCategory =
+  | 'bug'
+  | 'feature'
+  | 'improvement'
+  | 'ux'
+  | 'performance'
+  | 'other';
+
+export type FeedbackPriority = 'low' | 'medium' | 'high' | 'critical';
+
+export type FeedbackStatus = 'new' | 'reviewed' | 'planned' | 'done';
+
+export interface ProfileRecord {
+  id: string;
+  email: string;
+  full_name?: string | null;
+  job_title?: string | null;
+  timezone?: string | null;
+  avatar_url?: string | null;
+  bio?: string | null;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface UserSettings {
+  id: string;
+  theme: 'system' | 'light' | 'dark';
+  shortcut_hints_enabled: boolean;
+  notifications: {
+    email: boolean;
+    product: boolean;
+    feedback: boolean;
+    analysis: boolean;
+  };
+  dashboard_preferences: {
+    compact_mode: boolean;
+    default_project_view: 'grid' | 'list';
+    show_welcome_banner: boolean;
+  };
+  ai_preferences: {
+    default_output_length: 'short' | 'medium' | 'long' | 'extra-long';
+    include_cost_estimation: boolean;
+    include_timeline: boolean;
+  };
+  updated_at?: string;
+  created_at: string;
+}
+
+export interface SupportTicket {
+  id: string;
+  user_id: string;
+  project_id?: string | null;
+  subject: string;
+  message: string;
+  category: 'technical' | 'billing' | 'feature' | 'general';
+  priority: FeedbackPriority;
+  status: 'open' | 'in_progress' | 'resolved' | 'closed';
+  response_message?: string | null;
+  created_at: string;
+  updated_at?: string;
 }
 
 export interface AnalyzeFeedbackRequest {

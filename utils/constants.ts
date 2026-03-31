@@ -217,6 +217,7 @@ export const SUCCESS_MESSAGES = {
   PROJECT_UPDATED: 'Project updated successfully',
   PROJECT_DELETED: 'Project deleted successfully',
   FEEDBACK_CREATED: 'Feedback created successfully',
+  FEEDBACK_UPDATED: 'Feedback updated successfully',
   FEEDBACK_DELETED: 'Feedback deleted successfully',
   ANALYSIS_COMPLETED: 'Analysis completed successfully',
   DB_SETUP_COMPLETE: 'Database setup completed successfully',

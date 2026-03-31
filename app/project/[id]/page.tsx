@@ -4,10 +4,16 @@ import ProjectInputClient from './ProjectInputClient'
 
 interface ProjectPageProps {
   params: Promise<{ id: string }>
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>
 }
 
-export default async function ProjectPage({ params }: ProjectPageProps) {
+export default async function ProjectPage({ params, searchParams }: ProjectPageProps) {
   const { id } = await params
+  const search = await searchParams
+  const forceNew =
+    search.new === '1' ||
+    search.new === 'true' ||
+    (Array.isArray(search.new) && (search.new.includes('1') || search.new.includes('true')))
   const supabase = await createServerSupabaseClient()
 
   const {
@@ -30,22 +36,37 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
     notFound()
   }
 
-  // Check if there's an existing analysis - if so, redirect to output page
-  try {
-    const { data: existingAnalysis } = await supabase
-      .from('analyses')
-      .select('id')
-      .eq('project_id', id)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single()
+  if (!forceNew) {
+    // Check if there's an existing analysis - if so, redirect to output page
+    try {
+      const { data: existingSession } = await supabase
+        .from('analysis_sessions')
+        .select('id')
+        .eq('project_id', id)
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
 
-    // If analysis exists, show the output page
-    if (existingAnalysis) {
-      redirect(`/project/${id}/output`)
+      if (existingSession) {
+        redirect(`/project/${id}/output?analysis=${existingSession.id}`)
+      }
+
+      const { data: existingAnalysis } = await supabase
+        .from('analyses')
+        .select('id')
+        .eq('project_id', id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single()
+
+      // If analysis exists, show the output page
+      if (existingAnalysis) {
+        redirect(`/project/${id}/output`)
+      }
+    } catch {
+      // No analysis exists, continue to input page
     }
-  } catch {
-    // No analysis exists, continue to input page
   }
 
   // Show the input page for new projects

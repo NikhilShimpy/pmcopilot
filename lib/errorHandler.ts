@@ -86,6 +86,19 @@ export function handleError(error: unknown): NextResponse<ApiResponse> {
       isConfigError?: boolean;
     };
 
+    if (
+      typedError.message === 'Authentication required' ||
+      typedError.message.toLowerCase().includes('unauthorized')
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: typedError.message,
+        },
+        { status: 401 }
+      );
+    }
+
     if (typedError.isGeminiPoolExhausted) {
       return NextResponse.json(
         {

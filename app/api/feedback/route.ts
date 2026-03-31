@@ -7,7 +7,7 @@ import {
   validateRequired,
 } from '@/lib/errorHandler';
 import { feedbackService } from '@/services/feedback.service';
-import { CreateFeedbackRequest } from '@/types';
+import { CreateFeedbackRequest, FeedbackPriority, FeedbackStatus } from '@/types';
 import { SUCCESS_MESSAGES } from '@/utils/constants';
 
 /**
@@ -31,6 +31,9 @@ export async function GET(request: NextRequest) {
     const projectId = searchParams.get('project_id');
     const limit = parseInt(searchParams.get('limit') || '20');
     const offset = parseInt(searchParams.get('offset') || '0');
+    const status = searchParams.get('status') as FeedbackStatus | null;
+    const priority = searchParams.get('priority') as FeedbackPriority | null;
+    const search = searchParams.get('search') || undefined;
 
     let result;
 
@@ -40,12 +43,21 @@ export async function GET(request: NextRequest) {
         supabase,
         user,
         projectId,
-        { limit, offset }
+        {
+          limit,
+          offset,
+          status: status || undefined,
+          priority: priority || undefined,
+          search,
+        }
       );
     } else {
       result = await feedbackService.getUserFeedback(supabase, user, {
         limit,
         offset,
+        status: status || undefined,
+        priority: priority || undefined,
+        search,
       });
     }
 

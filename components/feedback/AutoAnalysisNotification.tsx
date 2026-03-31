@@ -117,7 +117,7 @@ export default function AutoAnalysisNotification({
                     className="mt-3"
                   >
                     <Link
-                      href={`/project/${projectId}/analysis/${analysisId}`}
+                      href={`/project/${projectId}/analysis?analysis=${analysisId}`}
                       className="inline-flex items-center gap-2 px-3 py-1.5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white text-xs font-medium rounded-lg hover:from-indigo-700 hover:to-purple-700 transition-all"
                     >
                       <Sparkles className="w-3 h-3" />

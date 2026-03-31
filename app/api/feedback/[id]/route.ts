@@ -3,6 +3,7 @@ import { createServerSupabaseClient, requireServerAuth } from '@/lib/supabase/se
 import { logger } from '@/lib/logger';
 import { handleError, successResponse } from '@/lib/errorHandler';
 import { feedbackService } from '@/services/feedback.service';
+import { CreateFeedbackRequest } from '@/types';
 import { SUCCESS_MESSAGES } from '@/utils/constants';
 
 /**
@@ -66,6 +67,40 @@ export async function DELETE(
   } catch (error) {
     const { id } = await params;
     logger.apiResponse('DELETE', `/api/feedback/${id}`, 500);
+    return handleError(error);
+  }
+}
+
+/**
+ * PATCH /api/feedback/[id]
+ * Update feedback fields/status
+ */
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id: feedbackId } = await params;
+    logger.apiRequest('PATCH', `/api/feedback/${feedbackId}`);
+
+    const supabase = await createServerSupabaseClient();
+    const user = await requireServerAuth();
+
+    const body: Partial<CreateFeedbackRequest> = await request.json();
+
+    const feedback = await feedbackService.updateFeedback(
+      supabase,
+      user,
+      feedbackId,
+      body
+    );
+
+    logger.apiResponse('PATCH', `/api/feedback/${feedbackId}`, 200);
+
+    return successResponse(feedback, SUCCESS_MESSAGES.FEEDBACK_UPDATED);
+  } catch (error) {
+    const { id } = await params;
+    logger.apiResponse('PATCH', `/api/feedback/${id}`, 500);
     return handleError(error);
   }
 }

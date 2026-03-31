@@ -54,8 +54,6 @@ export function AnalysisProgressIndicator({ isAnalyzing, onComplete }: AnalysisP
     ]
 
     let currentIndex = 0
-    let intervalId: ReturnType<typeof setInterval>
-
     const advanceStage = () => {
       if (currentIndex < stageOrder.length) {
         const stage = stageOrder[currentIndex]
@@ -73,7 +71,7 @@ export function AnalysisProgressIndicator({ isAnalyzing, onComplete }: AnalysisP
     advanceStage()
 
     // Track elapsed time
-    intervalId = setInterval(() => {
+    const intervalId = setInterval(() => {
       setElapsedTime((prev) => prev + 1)
     }, 1000)
 
