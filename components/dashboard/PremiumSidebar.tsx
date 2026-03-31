@@ -1,24 +1,24 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, type MouseEvent } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   LayoutDashboard,
   FolderKanban,
+  UserCircle2,
   Settings,
+  Keyboard,
   HelpCircle,
   ChevronLeft,
   ChevronRight,
-  Sparkles,
+  Brain,
   MessageSquare,
   BarChart3,
   Zap,
-  Bell,
   Moon,
   Sun,
-  CreditCard,
 } from 'lucide-react'
 
 interface PremiumSidebarProps {
@@ -27,26 +27,76 @@ interface PremiumSidebarProps {
 
 type NavLinkItem = {
   name: string
-  href?: string
+  href: string
   icon: React.ElementType
   gradient?: string
-  soon?: boolean
-  kind: 'link' | 'action'
-  action?: 'theme' | 'collapse'
+  match?: (pathname: string, hash: string) => boolean
 }
 
 const NAV_ITEMS: NavLinkItem[] = [
-  { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, gradient: 'from-blue-500 to-cyan-500', kind: 'link' },
-  { name: 'Projects', href: '/dashboard', icon: FolderKanban, gradient: 'from-violet-500 to-purple-500', kind: 'link' },
-  { name: 'AI Analysis', href: '/dashboard', icon: Sparkles, gradient: 'from-amber-500 to-orange-500', kind: 'link' },
-  { name: 'Feedback Hub', href: '/dashboard', icon: MessageSquare, gradient: 'from-emerald-500 to-teal-500', soon: true, kind: 'link' },
-  { name: 'Reports', href: '/dashboard', icon: BarChart3, gradient: 'from-pink-500 to-rose-500', soon: true, kind: 'link' },
-  { name: 'Notifications', href: '/dashboard', icon: Bell, kind: 'link' },
-  { name: 'Billing', href: '/dashboard', icon: CreditCard, soon: true, kind: 'link' },
-  { name: 'Settings', href: '/dashboard', icon: Settings, kind: 'link' },
-  { name: 'Help & Support', href: '/dashboard', icon: HelpCircle, kind: 'link' },
-  { name: 'Dark Mode', icon: Moon, kind: 'action', action: 'theme' },
-  { name: 'Collapse', icon: ChevronLeft, kind: 'action', action: 'collapse' },
+  {
+    name: 'Dashboard',
+    href: '/dashboard',
+    icon: LayoutDashboard,
+    gradient: 'from-blue-500 to-cyan-500',
+    match: (path, hash) => path === '/dashboard' && hash !== '#projects-section',
+  },
+  {
+    name: 'Projects',
+    href: '/dashboard#projects-section',
+    icon: FolderKanban,
+    gradient: 'from-violet-500 to-purple-500',
+    match: (path, hash) => path.startsWith('/project/') || (path === '/dashboard' && hash === '#projects-section'),
+  },
+  {
+    name: 'AI Analysis',
+    href: '/analysis',
+    icon: Brain,
+    gradient: 'from-amber-500 to-orange-500',
+    match: (path) =>
+      path === '/analysis' || (path.startsWith('/project/') && path.includes('/analysis')),
+  },
+  {
+    name: 'Feedback Hub',
+    href: '/feedback',
+    icon: MessageSquare,
+    gradient: 'from-emerald-500 to-teal-500',
+  },
+  {
+    name: 'Reports',
+    href: '/reports',
+    icon: BarChart3,
+    gradient: 'from-pink-500 to-rose-500',
+  },
+  {
+    name: 'Profile',
+    href: '/profile',
+    icon: UserCircle2,
+    gradient: 'from-indigo-500 to-blue-500',
+  },
+  {
+    name: 'Settings',
+    href: '/settings',
+    icon: Settings,
+    gradient: 'from-slate-500 to-zinc-500',
+  },
+  {
+    name: 'Shortcuts',
+    href: '/shortcuts',
+    icon: Keyboard,
+    gradient: 'from-cyan-500 to-sky-500',
+  },
+  {
+    name: 'Help & Support',
+    href: '/support',
+    icon: HelpCircle,
+    gradient: 'from-green-500 to-emerald-500',
+  },
+]
+
+const ACTION_ITEMS = [
+  { name: 'Dark Mode', icon: Moon, action: 'theme' as const },
+  { name: 'Collapse', icon: ChevronLeft, action: 'collapse' as const },
 ]
 
 export default function PremiumSidebar({ analysisCount = 0 }: PremiumSidebarProps) {
@@ -55,6 +105,7 @@ export default function PremiumSidebar({ analysisCount = 0 }: PremiumSidebarProp
   const [hoveredItem, setHoveredItem] = useState<string | null>(null)
   const [isDark, setIsDark] = useState(false)
   const [manuallyCollapsed, setManuallyCollapsed] = useState(false)
+  const [currentHash, setCurrentHash] = useState('')
   const pathname = usePathname()
 
   useEffect(() => {
@@ -65,11 +116,25 @@ export default function PremiumSidebar({ analysisCount = 0 }: PremiumSidebarProp
       window.matchMedia &&
       window.matchMedia('(prefers-color-scheme: dark)').matches
     const shouldUseDark =
-      storedTheme === 'dark' || (!storedTheme && document.documentElement.classList.contains('dark')) || (!storedTheme && prefersDark)
+      storedTheme === 'dark' ||
+      (storedTheme === 'system' && prefersDark) ||
+      (!storedTheme && document.documentElement.classList.contains('dark')) ||
+      (!storedTheme && prefersDark)
 
     document.documentElement.classList.toggle('dark', shouldUseDark)
     setIsDark(shouldUseDark)
   }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    const syncHash = () => setCurrentHash(window.location.hash || '')
+    syncHash()
+    window.addEventListener('hashchange', syncHash)
+    return () => window.removeEventListener('hashchange', syncHash)
+  }, [pathname])
 
   const handleMouseEnter = useCallback(() => {
     setIsHovering(true)
@@ -102,10 +167,39 @@ export default function PremiumSidebar({ analysisCount = 0 }: PremiumSidebarProp
     if (typeof window !== 'undefined') {
       window.localStorage.setItem('pmcopilot-theme', nextThemeDark ? 'dark' : 'light')
     }
+    void fetch('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ theme: nextThemeDark ? 'dark' : 'light' }),
+    }).catch(() => {
+      // Non-blocking persistence; local preference is already applied.
+    })
   }
 
-  const isActive = (href: string | undefined, itemName: string) =>
-    Boolean(href && pathname === href && itemName === 'Dashboard')
+  const isActive = (item: NavLinkItem) => {
+    if (item.match) {
+      return item.match(pathname, currentHash)
+    }
+    return pathname === item.href || pathname.startsWith(`${item.href}/`)
+  }
+
+  const handleNavClick = (item: NavLinkItem, event: MouseEvent<HTMLAnchorElement>) => {
+    if (item.name !== 'Projects') {
+      return
+    }
+
+    if (pathname !== '/dashboard') {
+      return
+    }
+
+    event.preventDefault()
+    setCurrentHash('#projects-section')
+    window.history.replaceState({}, '', '/dashboard#projects-section')
+    const target = document.getElementById('projects-section')
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  }
 
   const sidebarWidth = collapsed ? 80 : 280
 
@@ -145,34 +239,12 @@ export default function PremiumSidebar({ analysisCount = 0 }: PremiumSidebarProp
 
       <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1 scrollbar-thin scrollbar-thumb-gray-700/70">
         {NAV_ITEMS.map((item) => {
-          const itemActive = isActive(item.href, item.name)
+          const itemActive = isActive(item)
           const isHovered = hoveredItem === item.name
-          const isThemeAction = item.action === 'theme'
-          const isCollapseAction = item.action === 'collapse'
-          const Icon =
-            isThemeAction
-              ? isDark
-                ? Sun
-                : Moon
-              : isCollapseAction
-              ? collapsed
-                ? ChevronRight
-                : ChevronLeft
-              : item.icon
-
-          const label =
-            isThemeAction
-              ? isDark
-                ? 'Light Mode'
-                : 'Dark Mode'
-              : isCollapseAction
-              ? manuallyCollapsed
-                ? 'Expand'
-                : 'Collapse'
-              : item.name
+          const Icon = item.icon
 
           const commonClasses = `relative flex items-center py-3 rounded-xl transition-all duration-200 group ${
-            item.soon ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'
+            'cursor-pointer'
           } ${
             collapsed ? 'justify-center px-2' : 'gap-4 px-4'
           } ${
@@ -184,8 +256,6 @@ export default function PremiumSidebar({ analysisCount = 0 }: PremiumSidebarProp
           const iconContainerClasses = `relative w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-all duration-200 ${
             itemActive
               ? `bg-gradient-to-br ${item.gradient || 'from-blue-500 to-cyan-500'} shadow-[0_14px_28px_-14px_rgba(56,189,248,0.95)]`
-              : item.soon
-              ? 'bg-gray-800/50'
               : 'bg-gray-800/80 group-hover:bg-gray-700/80'
           }`
 
@@ -217,40 +287,18 @@ export default function PremiumSidebar({ analysisCount = 0 }: PremiumSidebarProp
                     transition={{ duration: 0.15 }}
                     className="flex-1 flex items-center justify-between min-w-0 z-10"
                   >
-                    <span className={`font-medium truncate ${item.soon ? 'text-gray-500' : ''}`}>{label}</span>
-                    {item.soon && (
-                      <span className="px-2 py-0.5 text-[10px] font-bold uppercase bg-gradient-to-r from-violet-500/20 to-purple-500/20 text-purple-400 rounded-full border border-purple-500/30">
-                        Soon
-                      </span>
-                    )}
+                    <span className="font-medium truncate">{item.name}</span>
                   </motion.div>
                 )}
               </AnimatePresence>
             </>
           )
 
-          if (item.kind === 'action') {
-            return (
-              <button
-                key={item.name}
-                onMouseEnter={() => setHoveredItem(item.name)}
-                onMouseLeave={() => setHoveredItem(null)}
-                onClick={() => {
-                  if (isThemeAction) toggleTheme()
-                  if (isCollapseAction) toggleCollapse()
-                }}
-                className={commonClasses}
-              >
-                {body}
-              </button>
-            )
-          }
-
           return (
             <Link
               key={item.name}
-              href={item.href || '#'}
-              onClick={item.soon ? (e) => e.preventDefault() : undefined}
+              href={item.href}
+              onClick={(event) => handleNavClick(item, event)}
               onMouseEnter={() => setHoveredItem(item.name)}
               onMouseLeave={() => setHoveredItem(null)}
               className={commonClasses}
@@ -260,6 +308,64 @@ export default function PremiumSidebar({ analysisCount = 0 }: PremiumSidebarProp
             </Link>
           )
         })}
+
+        <div className="pt-3 mt-3 border-t border-gray-800/50 space-y-1">
+          {ACTION_ITEMS.map((item) => {
+            const isThemeAction = item.action === 'theme'
+            const isCollapseAction = item.action === 'collapse'
+            const Icon =
+              isThemeAction
+                ? isDark
+                  ? Sun
+                  : Moon
+                : isCollapseAction
+                ? collapsed
+                  ? ChevronRight
+                  : ChevronLeft
+                : ChevronLeft
+
+            const label =
+              isThemeAction
+                ? isDark
+                  ? 'Light Mode'
+                  : 'Dark Mode'
+                : manuallyCollapsed
+                ? 'Expand'
+                : 'Collapse'
+
+            return (
+              <button
+                key={item.name}
+                onMouseEnter={() => setHoveredItem(item.name)}
+                onMouseLeave={() => setHoveredItem(null)}
+                onClick={() => {
+                  if (isThemeAction) toggleTheme()
+                  if (isCollapseAction) toggleCollapse()
+                }}
+                className={`relative flex items-center py-3 rounded-xl transition-all duration-200 group text-gray-300 hover:text-white hover:bg-white/5 ${
+                  collapsed ? 'justify-center px-2' : 'gap-4 px-4'
+                }`}
+              >
+                <div className="relative w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-all duration-200 bg-gray-800/80 group-hover:bg-gray-700/80">
+                  <Icon className="w-5 h-5 text-gray-200 group-hover:text-white" />
+                </div>
+                <AnimatePresence mode="wait">
+                  {!collapsed && (
+                    <motion.div
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: -10 }}
+                      transition={{ duration: 0.15 }}
+                      className="flex-1 flex items-center justify-between min-w-0 z-10"
+                    >
+                      <span className="font-medium truncate">{label}</span>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </button>
+            )
+          })}
+        </div>
       </nav>
     </motion.aside>
   )

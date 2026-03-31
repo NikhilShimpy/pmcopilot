@@ -77,6 +77,11 @@ export function useProjects(): UseProjectsReturn {
 
   const createProject = useCallback(async (name: string, description?: string) => {
     try {
+      const trimmedName = name.trim()
+      if (!trimmedName) {
+        return { success: false, error: 'Project name is required' }
+      }
+
       const supabase = createClientSupabaseClient()
       const { data: { user } } = await supabase.auth.getUser()
 
@@ -88,7 +93,7 @@ export function useProjects(): UseProjectsReturn {
         .from('projects')
         .insert({
           user_id: user.id,
-          name: name.trim(),
+          name: trimmedName,
           description: description?.trim() || null,
         })
         .select()
@@ -107,21 +112,19 @@ export function useProjects(): UseProjectsReturn {
 
   const deleteProject = useCallback(async (id: string) => {
     try {
-      const supabase = createClientSupabaseClient()
-      const { data: { user } } = await supabase.auth.getUser()
+      const response = await fetch(`/api/projects/${id}`, {
+        method: 'DELETE',
+      })
+      const payload = await response.json().catch(() => null)
 
-      if (!user) {
-        return { success: false, error: 'Not authenticated' }
-      }
-
-      const { error: deleteError } = await supabase
-        .from('projects')
-        .delete()
-        .eq('id', id)
-        .eq('user_id', user.id)
-
-      if (deleteError) {
-        return { success: false, error: deleteError.message }
+      if (!response.ok || payload?.success === false) {
+        return {
+          success: false,
+          error:
+            payload?.error ||
+            payload?.message ||
+            `Failed to delete project (status ${response.status})`,
+        }
       }
 
       setProjects(prev => prev.filter(p => p.id !== id))
@@ -133,6 +136,11 @@ export function useProjects(): UseProjectsReturn {
 
   const updateProject = useCallback(async (id: string, name: string, description?: string) => {
     try {
+      const trimmedName = name.trim()
+      if (!trimmedName) {
+        return { success: false, error: 'Project name is required' }
+      }
+
       const supabase = createClientSupabaseClient()
       const { data: { user } } = await supabase.auth.getUser()
 
@@ -143,7 +151,7 @@ export function useProjects(): UseProjectsReturn {
       const { data, error: updateError } = await supabase
         .from('projects')
         .update({
-          name: name.trim(),
+          name: trimmedName,
           description: description?.trim() || null,
           updated_at: new Date().toISOString(),
         })

@@ -17,12 +17,17 @@ import {
   validateRequired,
   throwValidationError,
 } from '@/lib/errorHandler';
-import { analysisEngineService } from '@/services/analysis-engine.service';
 import { generateOverviewAnalysis } from '@/lib/sectionedStrategyEngine';
 import { assertGeminiFreeTierConfig, config } from '@/lib/config';
 import { PipelineContext } from '@/types/analysis';
 import { SUCCESS_MESSAGES, DB_TABLES, VALIDATION } from '@/utils/constants';
 import { isValidUUID } from '@/utils/helpers';
+import {
+  buildResultFromSections,
+  ensureAnalysisSession,
+  syncAnalysisSessionProgress,
+  upsertAnalysisSectionsFromResult,
+} from '@/lib/analysisSessionStore';
 
 // Depth configuration for output control
 type OutputDepth = 'short' | 'medium' | 'long' | 'extra-long';
@@ -90,6 +95,13 @@ interface EnhancedAnalyzeRequest {
   project_id?: string;
   detail_level?: OutputDepth;
   reuse_cached?: boolean;
+  input_import_ids?: string[];
+  input_sources?: Array<{
+    source_type?: string;
+    input_method?: string;
+    label?: string;
+    import_id?: string;
+  }>;
   context?: {
     project_name?: string;
     project_context?: string;
@@ -105,10 +117,6 @@ function normalizeInput(input: string): string {
 
 function getInputHash(input: string): string {
   return createHash('sha256').update(normalizeInput(input)).digest('hex');
-}
-
-function getMetadataInputHash(result: any): string | undefined {
-  return result?.metadata?.input_hash;
 }
 
 /**
@@ -166,6 +174,41 @@ export async function POST(request: NextRequest) {
       throwValidationError('Feedback must contain meaningful text after trimming whitespace');
     }
     const inputHash = getInputHash(normalizedFeedback);
+    const inputImportIds = Array.isArray(body.input_import_ids)
+      ? body.input_import_ids.filter((id): id is string => typeof id === 'string' && isValidUUID(id))
+      : [];
+    const inputSources = Array.isArray(body.input_sources)
+      ? (body.input_sources
+          .map((source) => {
+            if (!source || typeof source !== 'object') {
+              return null;
+            }
+            const sourceType = typeof source.source_type === 'string' ? source.source_type.slice(0, 60) : undefined;
+            const inputMethod = typeof source.input_method === 'string' ? source.input_method.slice(0, 80) : undefined;
+            const label = typeof source.label === 'string' ? source.label.slice(0, 140) : undefined;
+            const importId =
+              typeof source.import_id === 'string' && isValidUUID(source.import_id)
+                ? source.import_id
+                : undefined;
+
+            if (!sourceType && !inputMethod && !label && !importId) {
+              return null;
+            }
+
+            return {
+              source_type: sourceType || 'unknown',
+              input_method: inputMethod || 'unknown',
+              label: label || sourceType || 'Imported input',
+              ...(importId ? { import_id: importId } : {}),
+            };
+          })
+          .filter(Boolean) as Array<{
+          source_type: string;
+          input_method: string;
+          label: string;
+          import_id?: string;
+        }>)
+      : [];
 
     // Get server client and user
     const supabase = await createServerSupabaseClient();
@@ -223,51 +266,39 @@ export async function POST(request: NextRequest) {
     const canReuseCached = body.reuse_cached !== false && isAuthenticated && !!body.project_id;
     if (canReuseCached) {
       const { data: candidates } = await supabase
-        .from(DB_TABLES.ANALYSES)
-        .select('id, result, created_at')
+        .from('analysis_sessions')
+        .select('id, title, prompt_hash, detail_level, metadata, created_at')
         .eq('project_id', body.project_id as string)
+        .eq('user_id', user.id)
+        .eq('prompt_hash', inputHash)
+        .eq('detail_level', depthLevel)
         .order('created_at', { ascending: false })
-        .limit(5);
+        .limit(1)
+        .maybeSingle();
 
-      const cached = (candidates || []).find((candidate: any) => {
-        const candidateResult = candidate?.result || {};
-        const metadata = candidateResult?.metadata || {};
-        const candidateHash = getMetadataInputHash(candidateResult);
-        const hasOverview = Boolean(
-          candidateResult?.executive_dashboard ||
-            (Array.isArray(candidateResult?.problem_analysis) &&
-              candidateResult.problem_analysis.length > 0) ||
-            (Array.isArray(candidateResult?.feature_system) &&
-              candidateResult.feature_system.length > 0)
+      if (candidates?.id) {
+        const { data: sectionRows } = await supabase
+          .from('analysis_sections')
+          .select('section_id, content')
+          .eq('session_id', candidates.id);
+
+        const cachedResult = buildResultFromSections(
+          sectionRows || [],
+          null,
+          candidates.metadata || {}
         );
-        const sameDepth = (metadata.detail_level || 'medium') === depthLevel;
-
-        if (!hasOverview || !sameDepth) {
-          return false;
-        }
-
-        if (candidateHash && candidateHash === inputHash) {
-          return true;
-        }
-
-        const candidateInput = metadata.source_input || '';
-        return candidateInput ? normalizeInput(candidateInput) === normalizedFeedback : false;
-      });
-
-      if (cached) {
-        const cachedResult = cached.result || {};
         const processingTime = Date.now() - startTime;
 
         logger.info('Reusing cached overview analysis', {
           requestId,
-          cachedAnalysisId: cached.id,
+          cachedAnalysisId: candidates.id,
           depthLevel,
         });
 
         return successResponse(
           {
             ...cachedResult,
-            saved_id: cached.id,
+            saved_id: candidates.id,
             provider: cachedResult?.metadata?.provider || 'gemini',
             api_processing_time_ms: processingTime,
             depth_level: depthLevel,
@@ -275,7 +306,9 @@ export async function POST(request: NextRequest) {
             metadata: {
               ...cachedResult.metadata,
               input_hash: cachedResult.metadata?.input_hash || inputHash,
-              saved_analysis_id: cached.id,
+              saved_analysis_id: candidates.id,
+              session_id: candidates.id,
+              session_title: candidates.title || cachedResult.metadata?.session_title,
             },
           },
           SUCCESS_MESSAGES.ANALYSIS_COMPLETED,
@@ -321,16 +354,68 @@ export async function POST(request: NextRequest) {
 
     // Save analysis if authenticated
     let savedAnalysisId: string | null = null;
+    let analysisSessionId: string | null = null;
+    let analysisSessionTitle: string | null = null;
     if (isAuthenticated && body.project_id) {
-      const saveResult = await analysisEngineService.saveAnalysis(
-        supabase,
-        body.project_id,
-        overviewResult.result
-      );
+      // Persist structured analysis session + section rows.
+      const session = await ensureAnalysisSession(supabase as any, {
+        userId: user.id,
+        projectId: body.project_id,
+        projectName: pipelineContext.project_name || 'Untitled Project',
+        prompt: normalizedFeedback,
+        detailLevel: depthLevel,
+        provider: overviewResult.provider,
+        model: overviewResult.result?.metadata?.model_used || config.gemini.model,
+        result: overviewResult.result as Record<string, any>,
+        legacyAnalysisId: null,
+      });
 
-      if (saveResult) {
-        savedAnalysisId = saveResult.id;
-        logger.info('Analysis saved', { requestId, analysisId: savedAnalysisId });
+      if (session?.id) {
+        analysisSessionId = session.id;
+        savedAnalysisId = session.id;
+        analysisSessionTitle = session.title;
+        await upsertAnalysisSectionsFromResult(supabase as any, {
+          sessionId: session.id,
+          userId: user.id,
+          projectId: body.project_id,
+          result: overviewResult.result as Record<string, any>,
+          provider: overviewResult.provider,
+          model: overviewResult.result?.metadata?.model_used || config.gemini.model,
+          inputHash,
+        });
+        await syncAnalysisSessionProgress(supabase as any, {
+          sessionId: session.id,
+          result: overviewResult.result as Record<string, any>,
+          metadata: {
+            ...(overviewResult.result?.metadata || {}),
+            saved_analysis_id: session.id,
+            session_id: session.id,
+            session_title: session.title,
+            input_sources: inputSources,
+            input_import_ids: inputImportIds,
+          },
+        });
+        logger.info('Analysis session saved', { requestId, sessionId: session.id });
+
+        if (inputImportIds.length > 0) {
+          const { error: importsLinkError } = await supabase
+            .from('analysis_input_imports')
+            .update({
+              analysis_session_id: session.id,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('project_id', body.project_id)
+            .eq('user_id', user.id)
+            .in('id', inputImportIds);
+
+          if (importsLinkError && importsLinkError.code !== '42P01') {
+            logger.warn('Failed to link input imports to analysis session', {
+              requestId,
+              sessionId: session.id,
+              error: importsLinkError.message,
+            });
+          }
+        }
       }
     }
 
@@ -361,6 +446,13 @@ export async function POST(request: NextRequest) {
         input_hash: overviewResult.result.metadata?.input_hash || inputHash,
         model_used: overviewResult.result.metadata?.model_used || config.gemini.model,
         saved_analysis_id: savedAnalysisId || undefined,
+        session_id: analysisSessionId || undefined,
+        session_title:
+          analysisSessionTitle ||
+          overviewResult.result.metadata?.session_title ||
+          undefined,
+        input_sources: inputSources,
+        input_import_ids: inputImportIds,
       },
     };
 
@@ -408,8 +500,121 @@ export async function GET(request: NextRequest) {
       throwValidationError('Invalid project_id format');
     }
 
-    // Build query
-    let query = supabase
+    // Prefer structured sessions table when available. Fallback to legacy analyses blob table.
+    let sessionsQuery = supabase
+      .from('analysis_sessions')
+      .select(
+        'id, project_id, title, prompt, detail_level, completion_percentage, generated_sections, legacy_analysis_id, metadata, created_at, projects!inner(user_id, name)'
+      )
+      .eq('projects.user_id', user.id)
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+
+    if (projectId) {
+      sessionsQuery = sessionsQuery.eq('project_id', projectId);
+    }
+
+    const { data: sessions, error: sessionsError } = await sessionsQuery;
+
+    if (!sessionsError) {
+      let sessionCountQuery = supabase
+        .from('analysis_sessions')
+        .select('id, projects!inner(user_id)', { count: 'exact', head: true })
+        .eq('projects.user_id', user.id);
+
+      if (projectId) {
+        sessionCountQuery = sessionCountQuery.eq('project_id', projectId);
+      }
+
+      const [{ count: sessionsCount }, { data: sections }] = await Promise.all([
+        sessionCountQuery,
+        sessions && sessions.length > 0
+          ? supabase
+              .from('analysis_sections')
+              .select('session_id, section_id, content')
+              .in(
+                'session_id',
+                sessions.map((session: any) => session.id)
+              )
+          : Promise.resolve({ data: [] as Array<any> }),
+      ]);
+
+      const legacyIds = (sessions || [])
+        .map((session: any) => session.legacy_analysis_id)
+        .filter((value: string | null) => Boolean(value));
+
+      const { data: legacyAnalyses } =
+        legacyIds.length > 0
+          ? await supabase
+              .from(DB_TABLES.ANALYSES)
+              .select('id, result')
+              .in('id', legacyIds)
+          : { data: [] as Array<any> };
+
+      const legacyById = new Map<string, any>(
+        (legacyAnalyses || []).map((analysis: any) => [analysis.id, analysis.result || {}])
+      );
+      const sectionsBySession = new Map<string, Array<any>>();
+      for (const section of sections || []) {
+        const bucket = sectionsBySession.get(section.session_id) || [];
+        bucket.push(section);
+        sectionsBySession.set(section.session_id, bucket);
+      }
+
+      const transformedAnalyses = (sessions || []).map((session: any) => {
+        const fallbackResult = session.legacy_analysis_id
+          ? legacyById.get(session.legacy_analysis_id) || {}
+          : {}
+        const result = buildResultFromSections(
+          sectionsBySession.get(session.id) || [],
+          fallbackResult,
+          session.metadata || {}
+        )
+
+        return {
+          id: session.id,
+          session_id: session.id,
+          project_id: session.project_id,
+          project_name: session.projects?.name,
+          title: session.title,
+          prompt: session.prompt,
+          detail_level: session.detail_level,
+          completion_percentage: session.completion_percentage,
+          generated_sections: session.generated_sections || [],
+          created_at: session.created_at,
+          result,
+          summary: {
+            problems_count: result?.problem_analysis?.length || 0,
+            features_count: result?.feature_system?.length || 0,
+            tasks_count: result?.development_tasks?.length || 0,
+          },
+        }
+      })
+
+      logger.apiResponse('GET', '/api/analyze', 200, {
+        count: transformedAnalyses.length,
+        total: sessionsCount || 0,
+      });
+
+      return successResponse({
+        analyses: transformedAnalyses,
+        total: sessionsCount || 0,
+        pagination: {
+          limit,
+          offset,
+          total: sessionsCount || 0,
+          has_more: offset + limit < (sessionsCount || 0),
+        },
+      });
+    }
+
+    const isMissingTable = sessionsError.message?.toLowerCase().includes('does not exist');
+    if (!isMissingTable) {
+      throw sessionsError;
+    }
+
+    // Legacy fallback path
+    let legacyQuery = supabase
       .from(DB_TABLES.ANALYSES)
       .select('id, project_id, result, created_at, projects!inner(user_id, name)')
       .eq('projects.user_id', user.id)
@@ -417,17 +622,16 @@ export async function GET(request: NextRequest) {
       .range(offset, offset + limit - 1);
 
     if (projectId) {
-      query = query.eq('project_id', projectId);
+      legacyQuery = legacyQuery.eq('project_id', projectId);
     }
 
-    const { data: analyses, error } = await query;
+    const { data: analyses, error } = await legacyQuery;
 
     if (error) {
       logger.error('Failed to fetch analyses', { error: error.message });
       throw error;
     }
 
-    // Get total count
     let countQuery = supabase
       .from(DB_TABLES.ANALYSES)
       .select('*, projects!inner(user_id)', { count: 'exact', head: true })
@@ -439,13 +643,12 @@ export async function GET(request: NextRequest) {
 
     const { count } = await countQuery;
 
-    // Transform results
     const transformedAnalyses = (analyses || []).map((analysis: any) => ({
       id: analysis.id,
       project_id: analysis.project_id,
       project_name: analysis.projects?.name,
       created_at: analysis.created_at,
-      result: analysis.result, // Include full result for output page
+      result: analysis.result,
       summary: {
         problems_count: analysis.result?.problem_analysis?.length || 0,
         features_count: analysis.result?.feature_system?.length || 0,

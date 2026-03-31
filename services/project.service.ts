@@ -217,11 +217,30 @@ export class ProjectService {
     await this.getProjectById(supabase, user, projectId);
 
     try {
-      const { error } = await supabase
+      let { error } = await supabase
         .from(DB_TABLES.PROJECTS)
         .delete()
         .eq('id', projectId)
         .eq('user_id', user.id);
+
+      if (error && this.isProjectForeignKeyBlocker(error)) {
+        logger.warn('Project delete blocked by FK dependencies, cleaning child rows', {
+          projectId,
+          userId: user.id,
+          error: error.message,
+          code: (error as any)?.code,
+        });
+
+        await this.cleanupProjectDependencies(supabase, user, projectId);
+
+        const retry = await supabase
+          .from(DB_TABLES.PROJECTS)
+          .delete()
+          .eq('id', projectId)
+          .eq('user_id', user.id);
+
+        error = retry.error;
+      }
 
       if (error) {
         logger.error('Failed to delete project', { error: error.message });
@@ -234,6 +253,62 @@ export class ProjectService {
         error: error instanceof Error ? error.message : 'Unknown error',
       });
       throw error;
+    }
+  }
+
+  private isProjectForeignKeyBlocker(error: { message?: string; code?: string; details?: string }): boolean {
+    const fullText = `${error.message || ''} ${error.details || ''}`.toLowerCase();
+    return (
+      error.code === '23503' ||
+      fullText.includes('analyses_project_id_fkey') ||
+      fullText.includes('violates foreign key constraint') ||
+      fullText.includes('update or delete on table "projects"')
+    );
+  }
+
+  private isMissingTableError(error: { code?: string; message?: string }): boolean {
+    return (
+      error.code === '42P01' ||
+      (error.message || '').toLowerCase().includes('does not exist')
+    );
+  }
+
+  private async cleanupProjectDependencies(
+    supabase: SupabaseClient,
+    user: User,
+    projectId: string
+  ): Promise<void> {
+    const childCleanupTables = ['analysis_sections', 'analysis_sessions', 'feedbacks', 'analyses'];
+
+    // Support tickets should be retained but detached from deleted project.
+    const supportCleanup = await supabase
+      .from('support_tickets')
+      .update({ project_id: null })
+      .eq('project_id', projectId)
+      .eq('user_id', user.id);
+
+    if (supportCleanup.error && !this.isMissingTableError(supportCleanup.error)) {
+      logger.error('Failed to detach support tickets before project delete', {
+        projectId,
+        error: supportCleanup.error.message,
+      });
+      throwDatabaseError('Failed to detach support tickets before deleting project', supportCleanup.error);
+    }
+
+    for (const tableName of childCleanupTables) {
+      const { error } = await supabase
+        .from(tableName)
+        .delete()
+        .eq('project_id', projectId);
+
+      if (error && !this.isMissingTableError(error)) {
+        logger.error('Failed to cleanup dependent rows before project delete', {
+          projectId,
+          tableName,
+          error: error.message,
+        });
+        throwDatabaseError(`Failed to cleanup ${tableName} before deleting project`, error);
+      }
     }
   }
 

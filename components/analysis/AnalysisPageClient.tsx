@@ -3,7 +3,18 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
-import { ArrowLeft, RefreshCw, Download, Share2 } from 'lucide-react'
+import {
+  ArrowLeft,
+  RefreshCw,
+  Download,
+  Share2,
+  AlertCircle,
+  BarChart3,
+  Search,
+  Zap,
+  Brain,
+  AlertTriangle,
+} from 'lucide-react'
 import { ComprehensiveAnalysisResult } from '@/types/analysis'
 import { EnhancedAnalysisResult } from '@/types/enhanced-analysis'
 
@@ -93,7 +104,7 @@ export default function AnalysisPageClient({ projectId, analysisId }: AnalysisPa
           className="max-w-md w-full bg-white rounded-2xl p-8 shadow-sm text-center"
         >
           <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <span className="text-3xl">❌</span>
+            <AlertCircle className="w-8 h-8 text-red-600" />
           </div>
           <h2 className="text-2xl font-bold text-gray-900 mb-2">Analysis Failed</h2>
           <p className="text-gray-600 mb-6">{error}</p>
@@ -193,7 +204,7 @@ export default function AnalysisPageClient({ projectId, analysisId }: AnalysisPa
             className="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-2xl p-6"
           >
             <h3 className="font-bold text-gray-900 mb-2 flex items-center gap-2">
-              <span className="text-xl">📊</span>
+              <BarChart3 className="w-5 h-5 text-blue-600" />
               Executive Summary
             </h3>
             <p className="text-gray-700 leading-relaxed">{standardAnalysis.executive_summary}</p>
@@ -209,7 +220,7 @@ export default function AnalysisPageClient({ projectId, analysisId }: AnalysisPa
             className="bg-white rounded-2xl p-6 shadow-sm"
           >
             <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2">
-              <span className="text-xl">🔍</span>
+              <Search className="w-5 h-5 text-blue-600" />
               Key Findings
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -221,7 +232,7 @@ export default function AnalysisPageClient({ projectId, analysisId }: AnalysisPa
                   transition={{ delay: 0.3 + i * 0.05 }}
                   className="flex items-start gap-3 p-4 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl border border-blue-200"
                 >
-                  <span className="text-blue-600 font-bold text-lg mt-0.5">•</span>
+                  <span className="text-blue-600 font-bold text-lg mt-0.5">-</span>
                   <p className="text-sm text-gray-700 leading-relaxed">{finding}</p>
                 </motion.div>
               ))}
@@ -256,7 +267,7 @@ export default function AnalysisPageClient({ projectId, analysisId }: AnalysisPa
             className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-2xl p-6"
           >
             <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2">
-              <span className="text-xl">⚡</span>
+              <Zap className="w-5 h-5 text-green-600" />
               Immediate Actions
             </h3>
             <div className="space-y-2">
@@ -287,7 +298,7 @@ export default function AnalysisPageClient({ projectId, analysisId }: AnalysisPa
             className="bg-white rounded-2xl p-6 shadow-sm"
           >
             <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2">
-              <span className="text-xl">🧠</span>
+              <Brain className="w-5 h-5 text-blue-600" />
               AI Methodology & Confidence
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -324,7 +335,7 @@ export default function AnalysisPageClient({ projectId, analysisId }: AnalysisPa
                   <ul className="space-y-1">
                     {standardAnalysis.explainability.limitations.map((limit, i) => (
                       <li key={i} className="flex items-start gap-2 text-sm text-gray-600">
-                        <span className="text-orange-600 mt-0.5">⚠</span>
+                        <AlertTriangle className="w-4 h-4 text-orange-600 mt-0.5 shrink-0" />
                         <span>{limit}</span>
                       </li>
                     ))}
@@ -343,14 +354,15 @@ export default function AnalysisPageClient({ projectId, analysisId }: AnalysisPa
           className="text-center py-6 text-sm text-gray-500"
         >
           <p>
-            Analysis ID: {standardAnalysis.analysis_id} • Model: {standardAnalysis.model_used} • Processing Time:{' '}
+            Analysis ID: {standardAnalysis.analysis_id} - Model: {standardAnalysis.model_used} - Processing Time:{' '}
             {(standardAnalysis.processing_time_ms / 1000).toFixed(2)}s
           </p>
           <p className="mt-1">
-            Powered by PMCopilot AI • {standardAnalysis.total_feedback_items} feedback items analyzed
+            Powered by PMCopilot AI - {standardAnalysis.total_feedback_items} feedback items analyzed
           </p>
         </motion.div>
       </div>
     </div>
   )
 }
+

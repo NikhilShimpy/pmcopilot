@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   FolderKanban,
@@ -14,11 +14,11 @@ import {
 import PremiumSidebar from '@/components/dashboard/PremiumSidebar'
 import PremiumNavbar from '@/components/dashboard/PremiumNavbar'
 import PremiumProjectCard from '@/components/dashboard/PremiumProjectCard'
-import ProjectCardSkeleton from '@/components/dashboard/ProjectCardSkeleton'
 import PremiumCreateProjectModal from '@/components/dashboard/PremiumCreateProjectModal'
 import DatabaseSetup from '@/components/dashboard/DatabaseSetup'
 import { useProjects } from '@/hooks/useProjects'
 import { useToast } from '@/components/ui/Toast'
+import { DashboardSkeletonGrid } from '@/components/ui/SkeletonLoaders'
 
 interface DashboardClientProps {
   user: {
@@ -29,16 +29,39 @@ interface DashboardClientProps {
 }
 
 export default function DashboardClient({ user, profile }: DashboardClientProps) {
-  const { projects, loading, error, needsSetup, fetchProjects, createProject, deleteProject, projectCount } = useProjects()
+  const {
+    projects,
+    loading,
+    error,
+    needsSetup,
+    fetchProjects,
+    createProject,
+    deleteProject,
+    updateProject,
+    projectCount,
+  } = useProjects()
   const { showToast } = useToast()
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [analytics, setAnalytics] = useState<{
+    analyses: number
+    feedback: number
+    analyzedProjects: number
+  } | null>(null)
 
   const filteredProjects = useMemo(() => {
     if (!searchQuery.trim()) return projects
     const normalized = searchQuery.trim().toLowerCase()
     return projects.filter((project) => project.name.toLowerCase().includes(normalized))
   }, [projects, searchQuery])
+
+  const recentProjectsCount = useMemo(() => {
+    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000
+    return projects.filter((project) => {
+      const activityAt = project.updated_at || project.created_at
+      return new Date(activityAt).getTime() >= sevenDaysAgo
+    }).length
+  }, [projects])
 
   const handleCreateProject = async (name: string, description?: string) => {
     const result = await createProject(name, description)
@@ -57,37 +80,96 @@ export default function DashboardClient({ user, profile }: DashboardClientProps)
     } else {
       showToast(result.error || 'Failed to delete project', 'error')
     }
+    return result
   }
+
+  const handleEditProject = async (id: string, name: string, description?: string) => {
+    const result = await updateProject(id, name, description)
+    if (result.success) {
+      showToast('Project updated successfully', 'success')
+    } else {
+      showToast(result.error || 'Failed to update project', 'error')
+    }
+    return result
+  }
+
+  useEffect(() => {
+    const fetchDashboardAnalytics = async () => {
+      try {
+        const response = await fetch('/api/reports/summary')
+        const payload = await response.json()
+        if (!response.ok || !payload.success) {
+          return
+        }
+        setAnalytics({
+          analyses: payload.data?.totals?.analyses || 0,
+          feedback: payload.data?.totals?.feedback || 0,
+          analyzedProjects: payload.data?.totals?.analyzed_projects || 0,
+        })
+      } catch {
+        // Silent fallback: dashboard remains usable without aggregate stats.
+      }
+    }
+
+    fetchDashboardAnalytics()
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+    if (window.location.hash !== '#projects-section') {
+      return
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      const target = document.getElementById('projects-section')
+      if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }
+    })
+
+    return () => window.cancelAnimationFrame(frame)
+  }, [loading])
 
   const stats = [
     {
       label: 'Total Projects',
       value: projectCount,
-      change: '+12%',
+      change:
+        recentProjectsCount > 0
+          ? `${recentProjectsCount} active in last 7d`
+          : 'No activity in last 7d',
+      tone: recentProjectsCount > 0 ? 'positive' : 'neutral',
       icon: FolderKanban,
       gradient: 'from-blue-500 to-cyan-500',
       bgGradient: 'from-blue-500/10 to-cyan-500/10',
     },
     {
       label: 'Active This Week',
-      value: projectCount,
-      change: '+8%',
+      value: recentProjectsCount,
+      change: recentProjectsCount > 0 ? 'Recently updated' : 'No recent updates',
+      tone: recentProjectsCount > 0 ? 'positive' : 'neutral',
       icon: Calendar,
       gradient: 'from-emerald-500 to-teal-500',
       bgGradient: 'from-emerald-500/10 to-teal-500/10',
     },
     {
       label: 'AI Analyses',
-      value: 0,
-      change: 'New',
+      value: analytics?.analyses || 0,
+      change: analytics?.analyzedProjects
+        ? `${analytics.analyzedProjects} projects analyzed`
+        : 'No analyses yet',
+      tone: analytics?.analyzedProjects ? 'positive' : 'neutral',
       icon: Sparkles,
       gradient: 'from-purple-500 to-pink-500',
       bgGradient: 'from-purple-500/10 to-pink-500/10',
     },
     {
-      label: 'Insights Generated',
-      value: 0,
-      change: 'Start now',
+      label: 'Feedback Items',
+      value: analytics?.feedback || 0,
+      change: analytics?.feedback ? 'Tracking enabled' : 'No feedback yet',
+      tone: analytics?.feedback ? 'positive' : 'neutral',
       icon: Target,
       gradient: 'from-amber-500 to-orange-500',
       bgGradient: 'from-amber-500/10 to-orange-500/10',
@@ -197,7 +279,7 @@ export default function DashboardClient({ user, profile }: DashboardClientProps)
                         <stat.icon className="w-6 h-6 text-white" />
                       </div>
                       <span className={`text-xs font-semibold px-2 py-1 rounded-full
-                        ${stat.change.startsWith('+')
+                        ${stat.tone === 'positive'
                           ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400'
                           : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
                         }`}>
@@ -267,7 +349,7 @@ export default function DashboardClient({ user, profile }: DashboardClientProps)
             </motion.div>
 
             {/* Projects Section */}
-            <div>
+            <section id="projects-section" className="scroll-mt-24">
               <div className="flex items-center justify-between mb-8">
                 <div>
                   <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Your Projects</h2>
@@ -311,10 +393,11 @@ export default function DashboardClient({ user, profile }: DashboardClientProps)
 
               {/* Loading State */}
               {loading && (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {[...Array(6)].map((_, i) => (
-                    <ProjectCardSkeleton key={i} />
-                  ))}
+                <div className="space-y-6">
+                  <div className="rounded-2xl border border-gray-800 bg-gray-900/80 px-5 py-4">
+                    <p className="text-sm text-gray-400">Loading your projects...</p>
+                  </div>
+                  <DashboardSkeletonGrid count={6} />
                 </div>
               )}
 
@@ -377,12 +460,13 @@ export default function DashboardClient({ user, profile }: DashboardClientProps)
                       key={project.id}
                       project={project}
                       onDelete={handleDeleteProject}
+                      onEdit={handleEditProject}
                       index={index}
                     />
                   ))}
                 </motion.div>
               )}
-            </div>
+            </section>
           </div>
         </main>
       </div>

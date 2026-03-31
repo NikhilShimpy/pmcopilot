@@ -403,7 +403,7 @@ export function ChatGPTLayout({
                 How can I help you today?
               </h2>
               <p className="text-lg text-slate-600 mb-8">
-                Ask me anything about your product analysis. I'll provide practical,
+                Ask me anything about your product analysis. I&apos;ll provide practical,
                 actionable insights with real cost estimates and timelines.
               </p>
               <div className="grid grid-cols-2 gap-4 text-sm max-w-xl mx-auto">

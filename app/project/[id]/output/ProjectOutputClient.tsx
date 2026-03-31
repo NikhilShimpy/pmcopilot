@@ -37,6 +37,7 @@ import {
   Minimize,
   ZoomIn,
   ZoomOut,
+  History,
 } from 'lucide-react'
 import { useToast } from '@/components/ui/Toast'
 import { createClientSupabaseClient } from '@/lib/supabase/client'
@@ -178,7 +179,7 @@ const COST_INTAKE_SECTIONS: CostIntakeSectionConfig[] = [
       { key: 'payment', label: 'Payment integration', options: ['None', 'Single gateway', 'Multiple gateways'] },
       { key: 'maps_location', label: 'Maps/location', options: ['None', 'Basic geolocation', 'Advanced mapping + routing'] },
       { key: 'communication', label: 'SMS/email/notifications', options: ['Email only', 'Email + SMS', 'Multi-channel + automation'] },
-      { key: 'ai_apis', label: 'AI APIs', options: ['None', 'Basic Gemini usage', 'Heavy Gemini usage'] },
+      { key: 'ai_apis', label: 'AI APIs', options: ['None', 'Basic AI usage', 'Advanced AI usage'] },
       { key: 'social_login', label: 'Social login', options: ['Not needed', '1 provider', 'Multiple providers'] },
       { key: 'domain_integrations', label: 'Domain integrations', options: ['None', 'Calendar/Wearables/CRM', 'Multiple deep integrations'] },
     ],
@@ -316,6 +317,7 @@ interface ProjectOutputClientProps {
   shouldGenerate: boolean
   initialAnalysis?: Partial<ComprehensiveStrategyResult> | null
   initialAnalysisId?: string | null
+  initialAnalysisSessionId?: string | null
 }
 
 interface StructuredChatAnswer {
@@ -333,6 +335,12 @@ interface ChatPanelMessage {
 }
 
 type AnalysisResultState = Partial<ComprehensiveStrategyResult> & {
+  overview_summary?: {
+    product_name?: string
+    one_line_summary?: string
+    core_value_props?: string[]
+    critical_unknowns?: string[]
+  }
   metadata?: {
     analysis_id?: string
     provider?: string
@@ -361,11 +369,23 @@ export default function ProjectOutputClient({
   shouldGenerate,
   initialAnalysis,
   initialAnalysisId,
+  initialAnalysisSessionId,
 }: ProjectOutputClientProps) {
   const router = useRouter()
   const { showToast } = useToast()
   const chatInputRef = useRef<HTMLTextAreaElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
+  const incomingAnalysisResult = shouldGenerate
+    ? null
+    : ((initialAnalysis as AnalysisResultState | null) || null)
+  const incomingAnalysisId =
+    initialAnalysisId ||
+    incomingAnalysisResult?.metadata?.saved_analysis_id ||
+    incomingAnalysisResult?.saved_id ||
+    null
+  const incomingAnalysisSessionId =
+    initialAnalysisSessionId ||
+    ((incomingAnalysisResult?.metadata?.session_id as string | null) || null)
 
   // State
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true) // Start collapsed like dashboard
@@ -373,13 +393,11 @@ export default function ProjectOutputClient({
   const [isGenerating, setIsGenerating] = useState(false)
   const [generationProgress, setGenerationProgress] = useState('')
   const [analysisResult, setAnalysisResult] = useState<AnalysisResultState | null>(
-    shouldGenerate ? null : (initialAnalysis as AnalysisResultState | null) || null
+    incomingAnalysisResult
   )
-  const [analysisId, setAnalysisId] = useState<string | null>(
-    initialAnalysisId ||
-      (initialAnalysis as AnalysisResultState | null)?.metadata?.saved_analysis_id ||
-      (initialAnalysis as AnalysisResultState | null)?.saved_id ||
-      null
+  const [analysisId, setAnalysisId] = useState<string | null>(incomingAnalysisId)
+  const [analysisSessionId, setAnalysisSessionId] = useState<string | null>(
+    incomingAnalysisSessionId
   )
   const [error, setError] = useState<string | null>(null)
   const [loadingSections, setLoadingSections] = useState<Partial<Record<SectionId, boolean>>>({})
@@ -405,6 +423,7 @@ export default function ProjectOutputClient({
   const mountedRef = useRef(false)
   const hasGeneratedRef = useRef(false) // Track if we've ever generated in this session
   const sectionRequestRef = useRef<Set<SectionId>>(new Set())
+  const lastSyncedViewKeyRef = useRef<string | null>(null)
 
   const isOverviewReady = useCallback((result: AnalysisResultState | null) => {
     if (!result) return false
@@ -583,6 +602,38 @@ export default function ProjectOutputClient({
   }, []) // Empty deps - only run on mount
 
   useEffect(() => {
+    if (shouldGenerate) {
+      lastSyncedViewKeyRef.current = null
+      return
+    }
+
+    const nextSyncKey = [
+      project.id,
+      incomingAnalysisSessionId || '',
+      incomingAnalysisId || '',
+    ].join('|')
+
+    if (lastSyncedViewKeyRef.current === nextSyncKey) {
+      return
+    }
+    lastSyncedViewKeyRef.current = nextSyncKey
+
+    setAnalysisResult(incomingAnalysisResult)
+    setAnalysisId(incomingAnalysisId)
+    setAnalysisSessionId(incomingAnalysisSessionId)
+    setError(null)
+    setLoadingSections({})
+    setCostIntake(normalizeCostIntakeState((incomingAnalysisResult as any)?.metadata?.cost_intake))
+    sectionRequestRef.current.clear()
+  }, [
+    incomingAnalysisId,
+    incomingAnalysisResult,
+    incomingAnalysisSessionId,
+    project.id,
+    shouldGenerate,
+  ])
+
+  useEffect(() => {
     if (analysisResult?.metadata?.cost_intake) {
       setCostIntake(normalizeCostIntakeState(analysisResult.metadata.cost_intake))
     }
@@ -605,7 +656,7 @@ export default function ProjectOutputClient({
 
     setIsGenerating(true)
     setError(null)
-    setGenerationProgress('Generating Gemini overview...')
+    setGenerationProgress('Generating AI overview...')
     console.log(`[PMCopilot] API call starting (${reqId})`, {
       inputLength: initialInput.length,
       outputLength,
@@ -648,9 +699,14 @@ export default function ProjectOutputClient({
         analysisData.metadata?.saved_analysis_id ||
         result.saved_id ||
         null
+      const savedSessionId =
+        analysisData.metadata?.session_id ||
+        analysisData.session_id ||
+        null
 
       setAnalysisResult(analysisData)
       setAnalysisId(savedId)
+      setAnalysisSessionId(savedSessionId)
       setGenerationProgress('')
       
       const provider = analysisData.provider || result.provider || 'unknown'
@@ -663,7 +719,7 @@ export default function ProjectOutputClient({
       
       showToast(
         provider === 'gemini'
-          ? 'Gemini overview is ready. Open any section to generate only that section.'
+          ? 'AI overview is ready. Open any section to generate only that section.'
           : `Analysis complete!`,
         'success'
       )
@@ -696,7 +752,7 @@ export default function ProjectOutputClient({
     }
 
     if (!analysisId) {
-      showToast('Generate the Gemini overview first', 'error')
+      showToast('Generate the AI overview first', 'error')
       return
     }
 
@@ -706,7 +762,7 @@ export default function ProjectOutputClient({
 
     sectionRequestRef.current.add(section)
     setLoadingSections(prev => ({ ...prev, [section]: true }))
-    setGenerationProgress(`Generating ${SECTIONS.find(s => s.id === section)?.label || section} with Gemini...`)
+    setGenerationProgress(`Generating ${SECTIONS.find(s => s.id === section)?.label || section} with AI...`)
 
     try {
       const effectiveCostIntake = options?.costIntake || costIntake
@@ -787,6 +843,9 @@ export default function ProjectOutputClient({
 
       setAnalysisResult(updatedResult)
       setAnalysisId(resolvedAnalysisId)
+      setAnalysisSessionId(
+        (updatedResult?.metadata?.session_id as string | null) || analysisSessionId
+      )
       cleanUrlParams(resolvedAnalysisId)
 
       showToast(`${SECTIONS.find(s => s.id === section)?.label || section} generated via ${provider}`, 'success')
@@ -799,7 +858,7 @@ export default function ProjectOutputClient({
       setLoadingSections(prev => ({ ...prev, [section]: false }))
       setGenerationProgress('')
     }
-  }, [analysisId, cleanUrlParams, costIntake, hasSectionContent, initialInput, isSectionFresh, loadingSections, outputLength, project.description, project.name, showToast])
+  }, [analysisId, analysisSessionId, cleanUrlParams, costIntake, hasSectionContent, initialInput, isSectionFresh, loadingSections, outputLength, project.description, project.name, showToast])
 
   const handleSectionChange = useCallback((section: SectionId) => {
     setActiveSection(section)
@@ -1028,7 +1087,18 @@ export default function ProjectOutputClient({
   const generateComprehensiveContent = () => {
     if (!analysisResult) return { title: '', content: '', summary: '' }
 
-    const title = `${project.name} - AI Product Strategy Analysis`
+    const renderUnknown = (value: unknown) => {
+      if (value === null || value === undefined) return ''
+      if (typeof value === 'string') return value
+      if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+      return JSON.stringify(value, null, 2)
+    }
+
+    const title =
+      (analysisResult.metadata?.session_title as string | undefined) ||
+      (analysisResult.overview_summary?.product_name
+        ? `Analysis - ${analysisResult.overview_summary.product_name}`
+        : `${project.name} - AI Product Strategy Analysis`)
     const date = new Date().toLocaleDateString('en-US', {
       year: 'numeric',
       month: 'long',
@@ -1276,6 +1346,31 @@ export default function ProjectOutputClient({
       }
     }
 
+    // Include all remaining generated sections that are not yet covered above.
+    const supplementalSections: Array<{ key: string; heading: string }> = [
+      { key: 'gaps_opportunities', heading: 'Gaps & Opportunities' },
+      { key: 'execution_roadmap', heading: 'Execution Roadmap' },
+      { key: 'manpower_planning', heading: 'Manpower Planning' },
+      { key: 'resource_requirements', heading: 'Resource Requirements' },
+      { key: 'resources', heading: 'Resources' },
+      { key: 'cost_estimation', heading: 'Cost Estimation' },
+      { key: 'time_estimation', heading: 'Timeline' },
+    ]
+
+    supplementalSections.forEach((section) => {
+      if (section.key === 'cost_estimation' && (analysisResult as any).cost_planning) return
+      if (section.key === 'time_estimation' && (analysisResult as any).time_planning) return
+      const value = (analysisResult as any)?.[section.key]
+      if (!value) return
+
+      content += `## ${section.heading}\n\n`
+      if (typeof value === 'string') {
+        content += `${value}\n\n`
+      } else {
+        content += `\`\`\`json\n${renderUnknown(value)}\n\`\`\`\n\n`
+      }
+    })
+
     // Generate summary
     const problemCount = analysisResult.problem_analysis?.length || 0
     const featureCount = analysisResult.feature_system?.length || 0
@@ -1435,12 +1530,16 @@ ${content
 
   // Render different sections based on activeSection
   const renderContent = () => {
+    const firstLoadingSectionEntry = Object.entries(loadingSections).find(([, loading]) => loading)
+    const sectionInFlight = (firstLoadingSectionEntry?.[0] as SectionId | undefined) || activeSection
+    const hasSectionGenerationInFlight = Boolean(firstLoadingSectionEntry)
+
     if (isGenerating) {
-      return <GeneratingState progress={generationProgress} />
+      return <GeneratingState progress={generationProgress} section="all" />
     }
 
-    if (activeSection !== 'all' && loadingSections[activeSection]) {
-      return <GeneratingState progress={generationProgress} />
+    if (hasSectionGenerationInFlight) {
+      return <GeneratingState progress={generationProgress} section={sectionInFlight} />
     }
 
     if (error) {
@@ -1660,7 +1759,7 @@ ${content
         {/* Sidebar Footer */}
         <div className="p-3 border-t border-gray-200 dark:border-gray-800">
           <button
-            onClick={() => router.push(`/project/${project.id}`)}
+            onClick={() => router.push(`/project/${project.id}?new=1`)}
             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg
               text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200
               hover:bg-gray-100 dark:hover:bg-gray-800 transition-all
@@ -1695,6 +1794,15 @@ ${content
             </div>
 
             <div className="flex items-center gap-2">
+              <Link
+                href={`/project/${project.id}/history`}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg
+                  text-gray-600 dark:text-gray-400
+                  hover:bg-gray-100 dark:hover:bg-gray-800 transition-all"
+              >
+                <History className="w-4 h-4" />
+                <span className="text-sm">History</span>
+              </Link>
               <button
                 onClick={() => setChatPanelOpen(!chatPanelOpen)}
                 className={`flex items-center gap-2 px-4 py-2 rounded-lg
@@ -2085,24 +2193,31 @@ function ExportOption({ icon: Icon, label, description, onClick }: ExportOptionP
 }
 
 // Loading/Generating State
-function GeneratingState({ progress }: { progress: string }) {
+function GeneratingState({
+  progress,
+  section,
+}: {
+  progress: string
+  section: SectionId
+}) {
+  const config = getSectionLoadingConfig(section)
+
   return (
-    <div className="flex flex-col items-center justify-center py-20">
-      <motion.div
-        animate={{ rotate: 360 }}
-        transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
-        className="w-20 h-20 rounded-2xl
-          bg-gradient-to-br from-blue-500 via-purple-500 to-pink-500
-          flex items-center justify-center shadow-xl shadow-purple-500/30 mb-6"
-      >
-        <Sparkles className="w-10 h-10 text-white" />
-      </motion.div>
-      <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
-        Generating Analysis...
-      </h3>
-      <p className="text-gray-500 dark:text-gray-400 mb-6">
-        {progress || 'AI is analyzing your input and generating comprehensive insights'}
-      </p>
+    <div className="space-y-8 py-10">
+      <div className="flex flex-col items-center justify-center text-center">
+        <div className="w-20 h-20 rounded-2xl border border-gray-200 dark:border-gray-800 bg-gray-100 dark:bg-gray-900 flex items-center justify-center">
+          <motion.div
+            animate={{ opacity: [0.4, 1, 0.4] }}
+            transition={{ duration: 1.4, repeat: Infinity }}
+            className="w-10 h-10 rounded-lg bg-gray-300 dark:bg-gray-700"
+          />
+        </div>
+        <h3 className="mt-2 text-xl font-semibold text-gray-900 dark:text-white">
+          Generating {config.title}
+        </h3>
+        <p className="mt-1 text-gray-500 dark:text-gray-400">
+          {progress || config.subtitle}
+        </p>
       <div className="w-64 h-2 bg-gray-200 dark:bg-gray-800 rounded-full overflow-hidden">
         <motion.div
           initial={{ width: 0 }}
@@ -2111,8 +2226,89 @@ function GeneratingState({ progress }: { progress: string }) {
           className="h-full bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500"
         />
       </div>
+      </div>
+
+      <div className={`grid ${config.gridClass} gap-4`}>
+        {Array.from({ length: config.items }).map((_, index) => (
+          <div
+            key={index}
+            className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5"
+          >
+            <motion.div
+              animate={{ opacity: [0.45, 0.95, 0.45] }}
+              transition={{ duration: 1.4, repeat: Infinity, delay: index * 0.08 }}
+              className="h-4 w-1/3 rounded bg-gray-200 dark:bg-gray-700"
+            />
+            <motion.div
+              animate={{ opacity: [0.45, 0.95, 0.45] }}
+              transition={{ duration: 1.4, repeat: Infinity, delay: index * 0.08 + 0.08 }}
+              className="mt-3 h-3 w-full rounded bg-gray-100 dark:bg-gray-800"
+            />
+            <motion.div
+              animate={{ opacity: [0.45, 0.95, 0.45] }}
+              transition={{ duration: 1.4, repeat: Infinity, delay: index * 0.08 + 0.16 }}
+              className="mt-2 h-3 w-5/6 rounded bg-gray-100 dark:bg-gray-800"
+            />
+            <motion.div
+              animate={{ opacity: [0.45, 0.95, 0.45] }}
+              transition={{ duration: 1.4, repeat: Infinity, delay: index * 0.08 + 0.24 }}
+              className="mt-2 h-3 w-2/3 rounded bg-gray-100 dark:bg-gray-800"
+            />
+          </div>
+        ))}
+      </div>
     </div>
   )
+}
+
+function getSectionLoadingConfig(section: SectionId): {
+  title: string
+  subtitle: string
+  gridClass: string
+  items: number
+} {
+  switch (section) {
+    case 'problem-analysis':
+    case 'feature-system':
+    case 'development-tasks':
+      return {
+        title: 'Section Insights',
+        subtitle: 'AI is preparing structured cards for this section.',
+        gridClass: 'grid-cols-1 md:grid-cols-2',
+        items: 6,
+      }
+    case 'prd':
+      return {
+        title: 'PRD Document',
+        subtitle: 'AI is drafting document blocks and requirement details.',
+        gridClass: 'grid-cols-1',
+        items: 5,
+      }
+    case 'execution-roadmap':
+    case 'timeline':
+      return {
+        title: 'Roadmap & Timeline',
+        subtitle: 'AI is organizing milestones and delivery phases.',
+        gridClass: 'grid-cols-1 md:grid-cols-2',
+        items: 4,
+      }
+    case 'cost-estimation':
+    case 'resources':
+    case 'manpower-planning':
+      return {
+        title: 'Planning Models',
+        subtitle: 'AI is calculating effort, resources, and estimates.',
+        gridClass: 'grid-cols-1 md:grid-cols-3',
+        items: 6,
+      }
+    default:
+      return {
+        title: 'Analysis',
+        subtitle: 'AI is analyzing your input and generating comprehensive insights.',
+        gridClass: 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3',
+        items: 6,
+      }
+  }
 }
 
 // Error State
@@ -3692,7 +3888,7 @@ function AllSectionsView({
 }) {
   const sectionSummary = (sectionId: SectionId, readyText: string, pendingText: string) =>
     loadingSections[sectionId]
-      ? 'Generating with Gemini...'
+      ? 'Generating with AI...'
       : data.metadata?.stale_sections?.includes(sectionId)
         ? `Stale after input update. ${pendingText}`
         : hasSectionContent(sectionId, data)
