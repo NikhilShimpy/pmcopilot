@@ -28,11 +28,11 @@ import {
   TrendingUp,
   ChevronLeft,
   ChevronRight,
-  Sparkles,
   Home,
   FolderKanban,
 } from 'lucide-react'
 import { useChatFirstStore, SECTIONS, SectionId } from '@/stores/chatFirstStore'
+import AppLogo from '@/components/shared/AppLogo'
 
 // Icon mapping
 const iconMap: Record<string, React.ElementType> = {
@@ -137,13 +137,15 @@ export function CollapsibleSidebar({ className = '' }: CollapsibleSidebarProps) 
       <div className="flex items-center h-16 px-4 border-b border-gray-200/50 dark:border-gray-700/50">
         <div className="flex items-center gap-3 w-full">
           <motion.div
-            className="flex items-center justify-center w-8 h-8 rounded-xl
-              bg-gradient-to-br from-blue-500 to-purple-600
-              shadow-lg shadow-blue-500/30"
+            className="flex items-center justify-center"
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
           >
-            <Sparkles className="w-5 h-5 text-white" />
+            <AppLogo
+              size={32}
+              priority
+              className="rounded-xl border-white/20 bg-gray-900/80 shadow-lg shadow-cyan-500/30"
+            />
           </motion.div>
 
           <AnimatePresence>
