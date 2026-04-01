@@ -24,6 +24,8 @@
     --input: 214.3 31.8% 91.4%;
     --ring: 221.2 83.2% 53.3%;
     --radius: 0.5rem;
+    --font-display: 'Sora', 'Space Grotesk', 'Avenir Next', 'Segoe UI', sans-serif;
+    --font-body: 'Manrope', 'DM Sans', 'Segoe UI', sans-serif;
   }
 
   .dark {
@@ -55,6 +57,7 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-family: var(--font-body);
   }
   
   /* Global scrollbar styling - Dark themed, subtle */
@@ -237,5 +240,36 @@
   /* Card hover effect */
   .card-hover {
     @apply transition-all duration-300 hover:shadow-lg hover:-translate-y-1;
+  }
+
+  .font-display {
+    font-family: var(--font-display);
+    letter-spacing: -0.02em;
+  }
+
+  .font-body {
+    font-family: var(--font-body);
+  }
+
+  .text-gradient-premium {
+    background-image: linear-gradient(95deg, #7dd3fc 0%, #60a5fa 45%, #a78bfa 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .public-grid-overlay {
+    background-image:
+      linear-gradient(to right, rgba(148, 163, 184, 0.09) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(148, 163, 184, 0.09) 1px, transparent 1px);
+    background-size: 72px 72px;
+    mask-image: radial-gradient(circle at 50% 50%, black 35%, transparent 92%);
+  }
+
+  .public-depth-card {
+    box-shadow:
+      0 35px 70px -45px rgba(15, 23, 42, 0.95),
+      0 20px 45px -30px rgba(14, 116, 144, 0.4),
+      inset 0 1px 0 rgba(255, 255, 255, 0.06);
   }
 }

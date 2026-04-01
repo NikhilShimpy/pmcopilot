@@ -19,6 +19,7 @@ import {
 } from 'lucide-react'
 import type { Project } from '@/types'
 import { useAuth } from '@/hooks/useAuth'
+import AppLogo from '@/components/shared/AppLogo'
 
 interface PremiumNavbarProps {
   user: {
@@ -106,7 +107,20 @@ export default function PremiumNavbar({
         border-b border-gray-200/50 dark:border-gray-800/50">
         <div className="h-full px-6 flex items-center justify-between">
           {/* Left Section - Search */}
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-4 min-w-0">
+            <Link
+              href="/dashboard"
+              className="flex items-center gap-2 rounded-xl border border-gray-200/60 bg-white/75 px-2 py-1.5 shadow-sm transition-colors hover:bg-white dark:border-gray-700/60 dark:bg-gray-900/70 dark:hover:bg-gray-900"
+            >
+              <AppLogo
+                size={34}
+                priority
+                className="rounded-lg border-white/20 bg-slate-900/80"
+              />
+              <span className="hidden xl:block text-sm font-semibold text-gray-800 dark:text-gray-100">
+                PMCopilot
+              </span>
+            </Link>
             <button
               onClick={() => setShowSearch(true)}
               className="flex items-center gap-3 px-4 py-2.5 rounded-xl

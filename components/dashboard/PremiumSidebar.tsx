@@ -16,10 +16,10 @@ import {
   Brain,
   MessageSquare,
   BarChart3,
-  Zap,
   Moon,
   Sun,
 } from 'lucide-react'
+import AppLogo from '@/components/shared/AppLogo'
 
 interface PremiumSidebarProps {
   analysisCount?: number
@@ -215,9 +215,11 @@ export default function PremiumSidebar({ analysisCount = 0 }: PremiumSidebarProp
       <div className="h-20 flex items-center px-5 border-b border-gray-800/50">
         <Link href="/dashboard" className="flex items-center gap-4 group">
           <motion.div whileHover={{ scale: 1.05, rotate: 5 }} className="relative">
-            <div className="w-12 h-12 rounded-2xl flex items-center justify-center bg-gradient-to-br from-blue-500 via-purple-500 to-pink-500 shadow-lg shadow-purple-500/25">
-              <Zap className="w-6 h-6 text-white" />
-            </div>
+            <AppLogo
+              size={48}
+              priority
+              className="rounded-2xl border-white/20 bg-gray-900/80 shadow-lg shadow-cyan-500/25"
+            />
             <div className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-emerald-500 border-2 border-gray-900 animate-pulse" />
           </motion.div>
           <AnimatePresence mode="wait">

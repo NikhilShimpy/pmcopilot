@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { ChevronDown, HelpCircle, Keyboard, LogOut, Settings, UserCircle2 } from 'lucide-react'
 import PremiumSidebar from './PremiumSidebar'
 import { useAuth } from '@/hooks/useAuth'
+import AppLogo from '@/components/shared/AppLogo'
 
 interface AppShellProps {
   user: {
@@ -52,11 +53,20 @@ export default function AppShell({
       <div className="flex-1 flex flex-col min-w-0">
         <header className="sticky top-0 z-30 border-b border-gray-800/80 bg-gray-950/85 backdrop-blur-xl">
           <div className="px-6 py-4 flex items-center justify-between gap-4">
-            <div className="min-w-0">
-              <h1 className="text-2xl font-bold text-white truncate">{title}</h1>
-              {description ? (
-                <p className="text-sm text-gray-400 mt-1 truncate">{description}</p>
-              ) : null}
+            <div className="min-w-0 flex items-center gap-3">
+              <Link href="/dashboard" className="flex-shrink-0">
+                <AppLogo
+                  size={38}
+                  priority
+                  className="rounded-xl border-white/20 bg-gray-900/80"
+                />
+              </Link>
+              <div className="min-w-0">
+                <h1 className="text-2xl font-bold text-white truncate">{title}</h1>
+                {description ? (
+                  <p className="text-sm text-gray-400 mt-1 truncate">{description}</p>
+                ) : null}
+              </div>
             </div>
 
             <div className="flex items-center gap-3">

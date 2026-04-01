@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -13,6 +14,7 @@ import {
   Plus,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
+import AppLogo from '@/components/shared/AppLogo'
 
 interface NavbarProps {
   user: {
@@ -44,17 +46,28 @@ export default function Navbar({ user, onCreateProject }: NavbarProps) {
     <header className="h-16 bg-white border-b border-gray-200 sticky top-0 z-40">
       <div className="h-full px-6 flex items-center justify-between">
         {/* Search */}
-        <div className="flex-1 max-w-xl">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Search projects..."
-              className="w-full pl-10 pr-4 py-2 bg-gray-100 border border-transparent rounded-lg text-sm focus:outline-none focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all"
+        <div className="flex items-center gap-4 flex-1 min-w-0">
+          <Link href="/dashboard" className="flex items-center gap-2 flex-shrink-0">
+            <AppLogo
+              size={36}
+              priority
+              className="rounded-lg border-gray-200 bg-slate-900/80 shadow-sm"
             />
-            <kbd className="absolute right-3 top-1/2 -translate-y-1/2 hidden sm:inline-flex px-2 py-0.5 text-xs text-gray-400 bg-white border border-gray-200 rounded">
-              ⌘K
-            </kbd>
+            <span className="hidden md:block font-semibold text-gray-900">PMCopilot</span>
+          </Link>
+
+          <div className="flex-1 max-w-xl">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search projects..."
+                className="w-full pl-10 pr-4 py-2 bg-gray-100 border border-transparent rounded-lg text-sm focus:outline-none focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all"
+              />
+              <kbd className="absolute right-3 top-1/2 -translate-y-1/2 hidden sm:inline-flex px-2 py-0.5 text-xs text-gray-400 bg-white border border-gray-200 rounded">
+                Ctrl+K
+              </kbd>
+            </div>
           </div>
         </div>
 
@@ -158,3 +171,4 @@ export default function Navbar({ user, onCreateProject }: NavbarProps) {
     </header>
   )
 }
+
