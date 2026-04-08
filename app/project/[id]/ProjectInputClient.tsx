@@ -50,6 +50,8 @@ interface LocalImport extends ProcessedImport {
 }
 
 const IMPORT_BUCKET = process.env.NEXT_PUBLIC_IMPORTS_BUCKET || 'analysis-imports'
+const MAX_IMPORT_FILE_SIZE_BYTES = 4 * 1024 * 1024
+const MAX_IMPORT_FILE_SIZE_LABEL = '4MB'
 const DOC_ACCEPT = '.txt,.md,.markdown,.pdf,.doc,.docx,.csv,.json,text/plain,text/markdown,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/csv,application/json'
 const IMAGE_ACCEPT = 'image/*'
 const AUDIO_ACCEPT = 'audio/*,.mp3,.wav,.m4a,.webm,.ogg'
@@ -305,6 +307,11 @@ export default function ProjectInputClient({ project: initialProject, user }: Pr
       let count = 0
       setProcessing(true)
       for (const file of files) {
+        if (file.size > MAX_IMPORT_FILE_SIZE_BYTES) {
+          showToast(`${file.name} exceeds the ${MAX_IMPORT_FILE_SIZE_LABEL} upload limit`, 'error')
+          continue
+        }
+
         const source = forceSource || inferSource(file)
         const method =
           forceMethod ||

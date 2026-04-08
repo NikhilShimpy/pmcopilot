@@ -5,6 +5,9 @@ interface RouteParams {
   params: Promise<{ id: string }>;
 }
 
+export const runtime = 'nodejs';
+export const maxDuration = 60;
+
 export async function POST(request: NextRequest, { params }: RouteParams) {
   const { id } = await params;
   return handleAnalyzeSectionRequest(request, {

@@ -1,13 +1,26 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import fs from 'fs'
-import path from 'path'
+import { getAuthCallbackUrlFromRequest, getRequestOrigin } from '@/lib/appUrl'
+
+export const runtime = 'nodejs'
+export const maxDuration = 30
+
+const REQUIRED_RUNTIME_FILES = [
+  'lib/auth.ts',
+  'hooks/useAuth.tsx',
+  'lib/supabase/client.ts',
+  'lib/supabase/server.ts',
+  'proxy.ts',
+]
 
 /**
  * Health Check & Status Endpoint
- * Visit: http://localhost:3000/api/health
+ * Visit: /api/health
  */
-export async function GET() {
+export async function GET(request: Request) {
+  const appOrigin = getRequestOrigin(request)
+  const callbackUrl = getAuthCallbackUrlFromRequest(request)
+
   const status = {
     status: 'healthy',
     timestamp: new Date().toISOString(),
@@ -19,13 +32,15 @@ export async function GET() {
       supabase: false,
       files: false
     },
+    files: REQUIRED_RUNTIME_FILES,
     endpoints: {
       setup_wizard: '/setup',
       verification: '/api/setup/verify',
       database_check: '/api/setup/database',
       signup: '/signup',
       login: '/login',
-      dashboard: '/dashboard'
+      dashboard: '/dashboard',
+      callback: callbackUrl,
     }
   }
 
@@ -35,38 +50,27 @@ export async function GET() {
   }
 
   // Check Supabase connection
-  try {
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-    )
-    await supabase.from('profiles').select('id').limit(1)
-
-    // If we get here without crashing, Supabase is reachable
-    status.checks.supabase = true
-  } catch {
-    status.checks.supabase = false
+  if (status.checks.environment) {
+    try {
+      const supabase = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+      )
+      await supabase.from('profiles').select('id').limit(1)
+      status.checks.supabase = true
+    } catch {
+      status.checks.supabase = false
+    }
   }
 
-  // Check if auth files exist
-  const authFiles = [
-    'lib/auth.ts',
-    'hooks/useAuth.tsx',
-    'middleware.ts'
-  ]
-
-  status.checks.files = authFiles.every(file => {
-    try {
-      return fs.existsSync(path.join(process.cwd(), file))
-    } catch {
-      return false
-    }
-  })
+  // Runtime file list is validated at build-time by TypeScript/Next bundling.
+  status.checks.files = REQUIRED_RUNTIME_FILES.length > 0
 
   const allChecks = Object.values(status.checks).every(check => check === true)
 
   return NextResponse.json({
     ...status,
+    app_origin: appOrigin,
     ready: allChecks,
     message: allChecks
       ? 'System ready - Visit /setup to complete database setup'

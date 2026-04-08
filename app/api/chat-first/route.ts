@@ -3,6 +3,9 @@ import { logger } from '@/lib/logger';
 import { generateGeminiContent } from '@/lib/geminiSectionClient';
 import { assertGeminiFreeTierConfig, config } from '@/lib/config';
 
+export const runtime = 'nodejs';
+export const maxDuration = 60;
+
 interface ChatHistoryItem {
   role: 'user' | 'assistant';
   content: string;
@@ -30,22 +33,22 @@ interface StructuredAnswer {
 const DEPTH_CONFIG = {
   short: {
     maxTokens: 700,
-    timeout: 40000,
+    timeout: 25000,
     style: 'Concise: 1 short paragraph + short bullets.',
   },
   medium: {
     maxTokens: 1000,
-    timeout: 50000,
+    timeout: 35000,
     style: 'Balanced detail with compact bullets.',
   },
   long: {
     maxTokens: 1300,
-    timeout: 60000,
+    timeout: 45000,
     style: 'Detailed but compact; avoid long essays.',
   },
   'extra-long': {
     maxTokens: 1600,
-    timeout: 70000,
+    timeout: 50000,
     style: 'Deep detail with clear prioritization.',
   },
 } as const;

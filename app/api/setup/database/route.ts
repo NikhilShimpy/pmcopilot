@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 
 /**
  * Automated Database Setup Route
- * Visit: http://localhost:3000/api/setup/database
+ * Visit: /api/setup/database
  *
  * This will automatically:
  * - Create profiles table

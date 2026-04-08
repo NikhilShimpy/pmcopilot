@@ -12,6 +12,9 @@ import { logger } from '@/lib/logger'
 import { callAI } from '@/lib/aiEngine'
 import type { ComprehensiveStrategyResult } from '@/types/comprehensive-strategy'
 
+export const runtime = 'nodejs'
+export const maxDuration = 60
+
 // Request validation schema
 interface ChatRequest {
   project_id?: string
@@ -36,7 +39,7 @@ interface ChatRequest {
 
 // Default configuration
 const DEFAULTS = {
-  TIMEOUT: 60000,
+  TIMEOUT: 45000,
   MAX_TOKENS: 2000,
   TEMPERATURE: 0.7,
   CHUNK_SIZE: 5,
@@ -77,7 +80,7 @@ function validateRequest(body: any): { valid: true; data: ChatRequest } | { vali
       analysis_id: body.analysis_id || body.context?.analysis?.metadata?.analysis_id || 'unknown',
       context: body.context,
       config: {
-        timeout: Math.min(body.config?.timeout || DEFAULTS.TIMEOUT, 120000),
+        timeout: Math.min(body.config?.timeout || DEFAULTS.TIMEOUT, 55000),
         max_tokens: Math.min(body.config?.max_tokens || DEFAULTS.MAX_TOKENS, 4000),
         temperature: body.config?.temperature || DEFAULTS.TEMPERATURE,
       }

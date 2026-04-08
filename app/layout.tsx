@@ -2,9 +2,10 @@ import type { Metadata } from 'next';
 import './globals.css';
 import { AuthProvider } from '@/hooks/useAuth';
 import { ToastProvider } from '@/components/ui/Toast';
+import { getPublicAppUrl } from '@/lib/appUrl';
 
 const ICON_URL = '/websiteicon.png?v=1';
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+const APP_URL = getPublicAppUrl();
 
 export const metadata: Metadata = {
   metadataBase: new URL(APP_URL),
