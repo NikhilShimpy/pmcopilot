@@ -334,16 +334,96 @@ The foundation is complete. Next phases include:
 
 ## 🤝 Contributing
 
-This is a production-grade foundation. When contributing:
-- Follow existing patterns
-- Maintain type safety
-- Add tests for new features
-- Update documentation
-- Use structured logging
+We welcome contributions from the community! Here's how you can help:
+
+### How to Contribute
+
+1. **Fork the Repository**
+   ```bash
+   # Click "Fork" on GitHub, then clone your fork
+   git clone https://github.com/YOUR_USERNAME/pmcopilot.git
+   cd pmcopilot
+   ```
+
+2. **Create a Feature Branch**
+   ```bash
+   git checkout -b feature/your-feature-name
+   ```
+
+3. **Make Your Changes**
+   - Follow existing code patterns
+   - Maintain type safety (TypeScript)
+   - Add tests for new features
+   - Update documentation
+   - Use structured logging
+
+4. **Test Your Changes**
+   ```bash
+   npm run type-check  # TypeScript check
+   npm run lint        # Code linting
+   npm run build       # Production build
+   ```
+
+5. **Commit Your Changes**
+   ```bash
+   git add .
+   git commit -m "feat: add your feature description"
+   ```
+   
+   Follow [Conventional Commits](https://www.conventionalcommits.org/):
+   - `feat:` - New feature
+   - `fix:` - Bug fix
+   - `docs:` - Documentation changes
+   - `refactor:` - Code refactoring
+   - `test:` - Adding tests
+   - `chore:` - Maintenance tasks
+
+6. **Push and Create Pull Request**
+   ```bash
+   git push origin feature/your-feature-name
+   ```
+   Then open a Pull Request on GitHub with:
+   - Clear description of changes
+   - Screenshots (if UI changes)
+   - Link to any related issues
+
+### Contribution Ideas
+
+- 🐛 **Bug Fixes** - Report or fix bugs
+- ✨ **Features** - Implement new features from issues
+- 📚 **Documentation** - Improve docs, add examples
+- 🎨 **UI/UX** - Enhance user interface
+- ⚡ **Performance** - Optimize code
+- 🧪 **Tests** - Add test coverage
+- 🌍 **Translations** - Add i18n support
+
+### Code Standards
+
+- **TypeScript**: Use strict typing, avoid `any`
+- **Components**: Functional components with hooks
+- **Styling**: Tailwind CSS classes only
+- **API Routes**: Follow RESTful conventions
+- **Error Handling**: Use centralized error handler
+- **Logging**: Use structured logger from `lib/logger.ts`
+
+### Need Help?
+
+- 📖 Check existing issues and discussions
+- 💬 Ask questions in GitHub Discussions
+- 📧 Reach out to the maintainer (see Author section)
+
+## 🙌 Author
+
+**Nikhil Shimpy**  
+- 💼 [LinkedIn](https://www.linkedin.com/in/nikhilshimpy/)  
+- 🐙 [GitHub](https://github.com/NikhilShimpy)  
+- 📸 [Instagram](https://www.instagram.com/nikhilshimpyy/?hl=en)
+- 🔗 [LinkTree](https://linktr.ee/nikhilshimpyy)
+- 🖥️ [Portfolio](https://nikhilshimpyyportfolio.vercel.app/)
 
 ## 📄 License
 
-Proprietary - All rights reserved
+MIT License - feel free to use this project for learning and building!
 
 ## 🔗 Resources
 
