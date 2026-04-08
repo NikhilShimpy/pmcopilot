@@ -21,6 +21,8 @@ export default function SetupWizardPage() {
   const [loading, setLoading] = useState(false)
   const [verificationResult, setVerificationResult] = useState<any>(null)
   const [copied, setCopied] = useState(false)
+  const [callbackUrl, setCallbackUrl] = useState('http://localhost:3000/auth/callback')
+  const [productionCallbackUrl, setProductionCallbackUrl] = useState('https://your-domain.com/auth/callback')
 
   const SQL_SCRIPT = `-- PMCopilot Authentication Database Setup
 -- Copy and paste this into Supabase SQL Editor
@@ -88,6 +90,16 @@ CREATE INDEX IF NOT EXISTS profiles_email_idx ON public.profiles(email);
 
   useEffect(() => {
     runVerification()
+  }, [])
+
+  useEffect(() => {
+    const origin = window.location.origin
+    const resolvedCallbackUrl = `${origin}/auth/callback`
+    setCallbackUrl(resolvedCallbackUrl)
+
+    if (!origin.includes('localhost') && !origin.includes('127.0.0.1')) {
+      setProductionCallbackUrl(resolvedCallbackUrl)
+    }
   }, [])
 
   const copySQL = async () => {
@@ -265,7 +277,7 @@ CREATE INDEX IF NOT EXISTS profiles_email_idx ON public.profiles(email);
                 </li>
                 <li className="flex items-start gap-2">
                   <span className="font-bold text-purple-600">2.</span>
-                  <span>Go to Authentication → URL Configuration</span>
+                  <span>Go to Authentication {'>'} URL Configuration</span>
                 </li>
                 <li className="flex items-start gap-2">
                   <span className="font-bold text-purple-600">3.</span>
@@ -275,10 +287,10 @@ CREATE INDEX IF NOT EXISTS profiles_email_idx ON public.profiles(email);
 
               <div className="bg-gray-50 rounded-lg p-4 mt-4 space-y-2">
                 <div className="flex items-center justify-between">
-                  <code className="text-sm text-gray-900">http://localhost:3000/auth/callback</code>
+                  <code className="text-sm text-gray-900">{callbackUrl}</code>
                   <button
                     onClick={() => {
-                      navigator.clipboard.writeText('http://localhost:3000/auth/callback')
+                      navigator.clipboard.writeText(callbackUrl)
                       setCopied(true)
                       setTimeout(() => setCopied(false), 2000)
                     }}
@@ -288,7 +300,7 @@ CREATE INDEX IF NOT EXISTS profiles_email_idx ON public.profiles(email);
                   </button>
                 </div>
                 <div className="flex items-center justify-between">
-                  <code className="text-sm text-gray-900">https://yourdomain.com/auth/callback</code>
+                  <code className="text-sm text-gray-900">{productionCallbackUrl}</code>
                   <span className="text-xs text-gray-500">(for production)</span>
                 </div>
               </div>

@@ -8,6 +8,9 @@ import { handleError, successResponse, throwValidationError } from '@/lib/errorH
 import { AI_CONFIG } from '@/utils/constants';
 import { isValidUUID } from '@/utils/helpers';
 
+export const runtime = 'nodejs';
+export const maxDuration = 60;
+
 type ImportSourceType =
   | 'text'
   | 'file'
@@ -31,7 +34,8 @@ interface ProcessImportRequest {
   additional_context?: string;
 }
 
-const MAX_IMPORT_FILE_SIZE_BYTES = 10 * 1024 * 1024;
+// Vercel serverless request payloads are constrained, so keep JSON file payloads conservative.
+const MAX_IMPORT_FILE_SIZE_BYTES = 4 * 1024 * 1024;
 const DEFAULT_IMPORT_BUCKET = process.env.NEXT_PUBLIC_IMPORTS_BUCKET || 'analysis-imports';
 
 const DOCUMENT_MIME_TYPES = new Set([
@@ -179,7 +183,7 @@ async function runGeminiMultimodalExtraction({
     requestBody,
     {
       headers: { 'Content-Type': 'application/json' },
-      timeout: 120000,
+      timeout: 50000,
     }
   );
 
@@ -321,7 +325,7 @@ export async function POST(request: NextRequest) {
     if (base64Data) {
       const estimatedSize = Math.ceil((base64Data.length * 3) / 4);
       if (estimatedSize > MAX_IMPORT_FILE_SIZE_BYTES) {
-        throwValidationError('File exceeds max supported size of 10MB');
+        throwValidationError('File exceeds max supported size of 4MB');
       }
     }
 

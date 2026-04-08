@@ -29,6 +29,9 @@ import {
   upsertAnalysisSectionsFromResult,
 } from '@/lib/analysisSessionStore';
 
+export const runtime = 'nodejs';
+export const maxDuration = 60;
+
 // Depth configuration for output control
 type OutputDepth = 'short' | 'medium' | 'long' | 'extra-long';
 
@@ -321,7 +324,7 @@ export async function POST(request: NextRequest) {
     try {
       overviewResult = await generateOverviewAnalysis(normalizedFeedback, {
         ...pipelineContext,
-        timeout: Math.min(depthConfig.timeout, 60000),
+        timeout: Math.min(depthConfig.timeout, 55000),
         inputHash,
       });
     } catch (error) {

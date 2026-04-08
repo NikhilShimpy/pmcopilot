@@ -542,7 +542,7 @@ export async function handleAnalyzeSectionRequest(
         depth:
           (typeof body.detail_level === 'string' ? body.detail_level : undefined) ||
           currentResult.metadata?.detail_level,
-        timeout: 60000,
+        timeout: 55000,
         inputHash,
       }
     );
