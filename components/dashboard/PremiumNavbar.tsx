@@ -17,7 +17,7 @@ import {
   Sparkles,
   Keyboard,
 } from 'lucide-react'
-import type { Project } from '@/types'
+import type { Project, ProfileRecord } from '@/types'
 import { useAuth } from '@/hooks/useAuth'
 
 interface PremiumNavbarProps {
@@ -25,6 +25,7 @@ interface PremiumNavbarProps {
     id: string
     email?: string | null
   }
+  profile?: ProfileRecord | null
   projects: Project[]
   searchQuery: string
   onSearchQueryChange: (value: string) => void
@@ -33,6 +34,7 @@ interface PremiumNavbarProps {
 
 export default function PremiumNavbar({
   user,
+  profile,
   projects,
   searchQuery,
   onSearchQueryChange,
@@ -86,7 +88,11 @@ export default function PremiumNavbar({
     fetchShortcutPreference()
   }, [])
 
-  const userInitials = user.email?.slice(0, 2).toUpperCase() || 'U'
+  const userInitials = profile?.full_name
+    ? profile.full_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()
+    : user.email?.slice(0, 2).toUpperCase() || 'U'
+  const displayName = profile?.full_name || user.email?.split('@')[0] || 'User'
+  const avatarUrl = profile?.avatar_url
 
   const handleSignOut = async () => {
     setIsSigningOut(true)
@@ -203,12 +209,21 @@ export default function PremiumNavbar({
                   hover:bg-gray-200 dark:hover:bg-gray-700
                   transition-all duration-200"
               >
-                <div className="w-9 h-9 rounded-xl
-                  bg-gradient-to-br from-blue-500 to-purple-600
-                  flex items-center justify-center
-                  text-white font-bold text-sm shadow-lg">
-                  {userInitials}
-                </div>
+                {avatarUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={avatarUrl}
+                    alt="Profile"
+                    className="w-9 h-9 rounded-xl object-cover shadow-lg border border-gray-200 dark:border-gray-700"
+                  />
+                ) : (
+                  <div className="w-9 h-9 rounded-xl
+                    bg-gradient-to-br from-blue-500 to-purple-600
+                    flex items-center justify-center
+                    text-white font-bold text-sm shadow-lg">
+                    {userInitials}
+                  </div>
+                )}
                 <ChevronDown className="w-4 h-4 text-gray-500 dark:text-gray-400" />
               </motion.button>
 
@@ -229,15 +244,24 @@ export default function PremiumNavbar({
                       {/* User Info */}
                       <div className="p-4 border-b border-gray-200 dark:border-gray-700">
                         <div className="flex items-center gap-3">
-                          <div className="w-12 h-12 rounded-xl
-                            bg-gradient-to-br from-blue-500 to-purple-600
-                            flex items-center justify-center
-                            text-white font-bold shadow-lg">
-                            {userInitials}
-                          </div>
+                          {avatarUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={avatarUrl}
+                              alt="Profile"
+                              className="w-12 h-12 rounded-xl object-cover shadow-lg border border-gray-200 dark:border-gray-700"
+                            />
+                          ) : (
+                            <div className="w-12 h-12 rounded-xl
+                              bg-gradient-to-br from-blue-500 to-purple-600
+                              flex items-center justify-center
+                              text-white font-bold shadow-lg">
+                              {userInitials}
+                            </div>
+                          )}
                           <div className="flex-1 min-w-0">
                             <p className="font-semibold text-gray-900 dark:text-white truncate">
-                              {user.email?.split('@')[0] || 'User'}
+                              {displayName}
                             </p>
                             <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
                               {user.email}

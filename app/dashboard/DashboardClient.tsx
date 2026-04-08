@@ -20,12 +20,14 @@ import { useProjects } from '@/hooks/useProjects'
 import { useToast } from '@/components/ui/Toast'
 import { DashboardSkeletonGrid } from '@/components/ui/SkeletonLoaders'
 
+import type { ProfileRecord } from '@/types'
+
 interface DashboardClientProps {
   user: {
     id: string
     email?: string | null
   }
-  profile: unknown
+  profile: ProfileRecord | null
 }
 
 export default function DashboardClient({ user, profile }: DashboardClientProps) {
@@ -184,6 +186,7 @@ export default function DashboardClient({ user, profile }: DashboardClientProps)
         <div className="flex-1 flex flex-col min-w-0">
           <PremiumNavbar
             user={user}
+            profile={profile}
             projects={projects}
             searchQuery={searchQuery}
             onSearchQueryChange={setSearchQuery}
@@ -207,6 +210,7 @@ export default function DashboardClient({ user, profile }: DashboardClientProps)
         {/* Premium Navbar */}
         <PremiumNavbar
           user={user}
+          profile={profile}
           projects={projects}
           searchQuery={searchQuery}
           onSearchQueryChange={setSearchQuery}
@@ -226,9 +230,9 @@ export default function DashboardClient({ user, profile }: DashboardClientProps)
                 <div>
                   <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-2">
                     Welcome back
-                    {(profile as { full_name?: string })?.full_name &&
+                    {profile?.full_name &&
                       <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600">
-                        , {(profile as { full_name?: string }).full_name}
+                        , {profile.full_name}
                       </span>
                     }
                     !

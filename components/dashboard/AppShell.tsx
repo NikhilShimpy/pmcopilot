@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { ChevronDown, HelpCircle, Keyboard, LogOut, Settings, UserCircle2 } from 'lucide-react'
 import PremiumSidebar from './PremiumSidebar'
 import { useAuth } from '@/hooks/useAuth'
+import { useUserProfile } from '@/hooks/useUserProfile'
 import AppLogo from '@/components/shared/AppLogo'
 
 interface AppShellProps {
@@ -29,13 +30,20 @@ export default function AppShell({
 }: AppShellProps) {
   const router = useRouter()
   const { signOut } = useAuth()
+  const { profile } = useUserProfile()
   const [showUserMenu, setShowUserMenu] = useState(false)
   const [isSigningOut, setIsSigningOut] = useState(false)
 
   const initials = useMemo(() => {
+    if (profile?.full_name) {
+      return profile.full_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()
+    }
     if (!user.email) return 'U'
     return user.email.slice(0, 2).toUpperCase()
-  }, [user.email])
+  }, [user.email, profile?.full_name])
+
+  const displayName = profile?.full_name || user.email?.split('@')[0] || 'User'
+  const avatarUrl = profile?.avatar_url
 
   const handleSignOut = async () => {
     setIsSigningOut(true)
@@ -79,9 +87,18 @@ export default function AppShell({
                     bg-gray-900 border border-gray-800
                     hover:border-gray-700 transition-all"
                 >
-                  <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center text-white font-semibold text-sm">
-                    {initials}
-                  </div>
+                  {avatarUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={avatarUrl}
+                      alt="Profile"
+                      className="w-9 h-9 rounded-xl object-cover border border-gray-700"
+                    />
+                  ) : (
+                    <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center text-white font-semibold text-sm">
+                      {initials}
+                    </div>
+                  )}
                   <ChevronDown className="w-4 h-4 text-gray-400" />
                 </button>
 
@@ -99,11 +116,25 @@ export default function AppShell({
                         className="absolute right-0 top-full mt-2 w-64 z-50 rounded-2xl
                           border border-gray-800 bg-gray-900 shadow-2xl overflow-hidden"
                       >
-                        <div className="p-4 border-b border-gray-800">
-                          <p className="text-sm font-semibold text-white truncate">
-                            {user.email || 'User'}
-                          </p>
-                          <p className="text-xs text-gray-400 mt-1">Account</p>
+                        <div className="p-4 border-b border-gray-800 flex items-center gap-3">
+                          {avatarUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={avatarUrl}
+                              alt="Profile"
+                              className="w-10 h-10 rounded-xl object-cover border border-gray-700"
+                            />
+                          ) : (
+                            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center text-white font-semibold">
+                              {initials}
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-white truncate">
+                              {displayName}
+                            </p>
+                            <p className="text-xs text-gray-400 truncate">{user.email}</p>
+                          </div>
                         </div>
                         <div className="p-2">
                           <Link

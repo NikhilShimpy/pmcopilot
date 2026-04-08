@@ -14,6 +14,7 @@ import {
   Plus,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
+import { useUserProfile } from '@/hooks/useUserProfile'
 import AppLogo from '@/components/shared/AppLogo'
 
 interface NavbarProps {
@@ -27,6 +28,7 @@ interface NavbarProps {
 export default function Navbar({ user, onCreateProject }: NavbarProps) {
   const router = useRouter()
   const { signOut } = useAuth()
+  const { profile } = useUserProfile()
   const [showUserMenu, setShowUserMenu] = useState(false)
   const [loading, setLoading] = useState(false)
 
@@ -40,7 +42,11 @@ export default function Navbar({ user, onCreateProject }: NavbarProps) {
     }
   }
 
-  const userInitial = user.email ? user.email[0].toUpperCase() : 'U'
+  const userInitial = profile?.full_name
+    ? profile.full_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()
+    : user.email ? user.email[0].toUpperCase() : 'U'
+  const displayName = profile?.full_name || user.email?.split('@')[0] || 'User'
+  const avatarUrl = profile?.avatar_url
 
   return (
     <header className="h-16 bg-white border-b border-gray-200 sticky top-0 z-40">
@@ -106,9 +112,18 @@ export default function Navbar({ user, onCreateProject }: NavbarProps) {
               onClick={() => setShowUserMenu(!showUserMenu)}
               className="flex items-center gap-2 p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
             >
-              <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center">
-                <span className="text-white font-medium text-sm">{userInitial}</span>
-              </div>
+              {avatarUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={avatarUrl}
+                  alt="Profile"
+                  className="w-8 h-8 rounded-full object-cover border border-gray-200"
+                />
+              ) : (
+                <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center">
+                  <span className="text-white font-medium text-sm">{userInitial}</span>
+                </div>
+              )}
               <ChevronDown className="w-4 h-4 text-gray-500 hidden sm:block" />
             </button>
 
@@ -128,27 +143,42 @@ export default function Navbar({ user, onCreateProject }: NavbarProps) {
                   >
                     <div className="p-4 border-b border-gray-100">
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center">
-                          <span className="text-white font-medium">{userInitial}</span>
-                        </div>
+                        {avatarUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={avatarUrl}
+                            alt="Profile"
+                            className="w-10 h-10 rounded-full object-cover border border-gray-200"
+                          />
+                        ) : (
+                          <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center">
+                            <span className="text-white font-medium">{userInitial}</span>
+                          </div>
+                        )}
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium text-gray-900 truncate">
-                            {user.email}
+                            {displayName}
                           </p>
-                          <p className="text-xs text-gray-500">Free Plan</p>
+                          <p className="text-xs text-gray-500 truncate">{user.email}</p>
                         </div>
                       </div>
                     </div>
 
                     <div className="p-2">
-                      <button className="w-full flex items-center gap-3 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
+                      <Link
+                        href="/profile"
+                        className="w-full flex items-center gap-3 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                      >
                         <User className="w-4 h-4" />
                         Profile
-                      </button>
-                      <button className="w-full flex items-center gap-3 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
+                      </Link>
+                      <Link
+                        href="/settings"
+                        className="w-full flex items-center gap-3 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                      >
                         <Settings className="w-4 h-4" />
                         Settings
-                      </button>
+                      </Link>
                     </div>
 
                     <div className="p-2 border-t border-gray-100">
