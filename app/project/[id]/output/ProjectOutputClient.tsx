@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useState, useCallback, useEffect, useRef } from 'react'
 import Link from 'next/link'
@@ -38,6 +38,8 @@ import {
   ZoomIn,
   ZoomOut,
   History,
+  Clock3,
+  Plus,
 } from 'lucide-react'
 import { useToast } from '@/components/ui/Toast'
 import { createClientSupabaseClient } from '@/lib/supabase/client'
@@ -61,6 +63,8 @@ type SectionId =
   | 'cost-estimation'
   | 'timeline'
   | 'impact-analysis'
+
+type TrackableSectionId = Exclude<SectionId, 'all'>
 
 interface SectionInfo {
   id: SectionId
@@ -86,6 +90,10 @@ const SECTIONS: SectionInfo[] = [
   { id: 'timeline', label: 'Timeline', icon: Calendar, description: 'Project schedule', category: 'planning' },
   { id: 'impact-analysis', label: 'Impact Analysis', icon: TrendingUp, description: 'Expected outcomes', category: 'planning' },
 ]
+
+const TRACKABLE_SECTIONS = SECTIONS.filter(
+  (section): section is SectionInfo & { id: TrackableSectionId } => section.id !== 'all'
+)
 
 type CostIntakeState = {
   market_business: Record<string, string>
@@ -121,7 +129,7 @@ const COST_INTAKE_SECTIONS: CostIntakeSectionConfig[] = [
     id: 'market_business',
     title: '1. Market & Business Factors',
     fields: [
-      { key: 'target_market_size', label: 'Target market size', options: ['Niche (<₹5Cr TAM)', 'Mid-size (₹5-50Cr TAM)', 'Large (₹50Cr+ TAM)'] },
+      { key: 'target_market_size', label: 'Target market size', options: ['Niche (<â‚¹5Cr TAM)', 'Mid-size (â‚¹5-50Cr TAM)', 'Large (â‚¹50Cr+ TAM)'] },
       { key: 'audience_type', label: 'Audience type', options: ['B2C', 'B2B', 'Hybrid B2B2C'] },
       { key: 'monetization_model', label: 'Monetization model', options: ['Subscription', 'Freemium', 'Marketplace/Transaction'] },
       { key: 'competition_level', label: 'Competition level', options: ['Low', 'Medium', 'High'] },
@@ -298,6 +306,23 @@ const hasCostIntakeSelections = (intake: CostIntakeState) => {
   return COST_INTAKE_SECTIONS.some((section) => Object.keys(intake[section.id] || {}).length > 0)
 }
 
+const hasCostIntakeContent = (intake: CostIntakeState) =>
+  hasCostIntakeSelections(intake) || intake.notes.trim().length > 0
+
+const getCostIntakeSelectionCount = (intake: CostIntakeState) =>
+  COST_INTAKE_SECTIONS.reduce(
+    (count, section) => count + Object.keys(intake[section.id] || {}).length,
+    0
+  )
+
+const CHAT_PANEL_DEFAULT_WIDTH = 540
+const CHAT_PANEL_MIN_WIDTH = 420
+const CHAT_PANEL_MAX_WIDTH = 1100
+const CHAT_HISTORY_SIDEBAR_DEFAULT_WIDTH = 220
+const CHAT_HISTORY_SIDEBAR_MIN_WIDTH = 200
+const CHAT_HISTORY_SIDEBAR_MAX_WIDTH = 360
+const CHAT_HISTORY_SIDEBAR_COLLAPSED_WIDTH = 56
+
 const normalizeScoreOutOfTen = (value: unknown, fallback = 0) => {
   const numeric = Number(value)
   if (!Number.isFinite(numeric)) return fallback
@@ -318,6 +343,7 @@ interface ProjectOutputClientProps {
   initialAnalysis?: Partial<ComprehensiveStrategyResult> | null
   initialAnalysisId?: string | null
   initialAnalysisSessionId?: string | null
+  initialLegacyAnalysisId?: string | null
 }
 
 interface StructuredChatAnswer {
@@ -332,6 +358,16 @@ interface ChatPanelMessage {
   role: 'user' | 'assistant'
   content: string
   structured?: StructuredChatAnswer | null
+}
+
+interface FollowUpSessionSummary {
+  id: string
+  title: string
+  active_section: SectionId
+  message_count: number
+  created_at: string
+  updated_at: string
+  last_message_at: string
 }
 
 type AnalysisResultState = Partial<ComprehensiveStrategyResult> & {
@@ -361,6 +397,61 @@ type AnalysisResultState = Partial<ComprehensiveStrategyResult> & {
   time_planning?: any
 }
 
+const FOLLOW_UP_TITLE_STOP_WORDS = new Set([
+  'a',
+  'an',
+  'and',
+  'for',
+  'how',
+  'i',
+  'is',
+  'me',
+  'my',
+  'of',
+  'on',
+  'please',
+  'the',
+  'to',
+  'we',
+  'what',
+  'with',
+])
+
+function deriveFollowUpTitle(message: string, fallback: string) {
+  const normalized = message.replace(/\s+/g, ' ').trim()
+  if (!normalized) {
+    return `Follow-up - ${fallback}`
+  }
+
+  const cleaned = normalized
+    .replace(/^(can you|please|help me|i want to|i need to|tell me|show me)\s+/i, '')
+    .replace(/^[\-\*\d\.\)\(]+/, '')
+    .trim()
+
+  const tokens = (cleaned.match(/[A-Za-z0-9]+/g) || []).filter(
+    (token) => !FOLLOW_UP_TITLE_STOP_WORDS.has(token.toLowerCase())
+  )
+
+  const source = (tokens.length >= 3 ? tokens : cleaned.match(/[A-Za-z0-9]+/g) || [])
+    .slice(0, 7)
+    .join(' ')
+    .trim()
+
+  return source ? source.slice(0, 80) : `Follow-up - ${fallback}`
+}
+
+function formatFollowUpTimestamp(value: string) {
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    return 'Recently'
+  }
+
+  return parsed.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+  })
+}
+
 export default function ProjectOutputClient({
   project,
   user,
@@ -370,6 +461,7 @@ export default function ProjectOutputClient({
   initialAnalysis,
   initialAnalysisId,
   initialAnalysisSessionId,
+  initialLegacyAnalysisId,
 }: ProjectOutputClientProps) {
   const router = useRouter()
   const { showToast } = useToast()
@@ -385,7 +477,9 @@ export default function ProjectOutputClient({
     null
   const incomingAnalysisSessionId =
     initialAnalysisSessionId ||
-    ((incomingAnalysisResult?.metadata?.session_id as string | null) || null)
+    (initialLegacyAnalysisId
+      ? null
+      : ((incomingAnalysisResult?.metadata?.session_id as string | null) || null))
 
   // State
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true) // Start collapsed like dashboard
@@ -399,6 +493,9 @@ export default function ProjectOutputClient({
   const [analysisSessionId, setAnalysisSessionId] = useState<string | null>(
     incomingAnalysisSessionId
   )
+  const [legacyAnalysisId, setLegacyAnalysisId] = useState<string | null>(
+    initialLegacyAnalysisId || null
+  )
   const [error, setError] = useState<string | null>(null)
   const [loadingSections, setLoadingSections] = useState<Partial<Record<SectionId, boolean>>>({})
   const [costIntake, setCostIntake] = useState<CostIntakeState>(() =>
@@ -410,9 +507,20 @@ export default function ProjectOutputClient({
   const [chatPanelOpen, setChatPanelOpen] = useState(false)
   const [chatFullscreen, setChatFullscreen] = useState(false)
   const [chatZoomLevel, setChatZoomLevel] = useState(1) // 1 = normal, 0.8 = zoom out, 1.2 = zoom in
+  const [chatPanelWidth, setChatPanelWidth] = useState(CHAT_PANEL_DEFAULT_WIDTH)
+  const [chatHistorySidebarWidth, setChatHistorySidebarWidth] = useState(
+    CHAT_HISTORY_SIDEBAR_DEFAULT_WIDTH
+  )
+  const [chatHistorySidebarCollapsed, setChatHistorySidebarCollapsed] = useState(false)
   const [chatInput, setChatInput] = useState('')
   const [chatMessages, setChatMessages] = useState<ChatPanelMessage[]>([])
+  const [chatSessions, setChatSessions] = useState<FollowUpSessionSummary[]>([])
+  const [activeChatSessionId, setActiveChatSessionId] = useState<string | null>(null)
   const [isChatStreaming, setIsChatStreaming] = useState(false)
+  const [isChatHistoryLoading, setIsChatHistoryLoading] = useState(false)
+  const [isChatSessionLoading, setIsChatSessionLoading] = useState(false)
+  const [chatHistoryLoaded, setChatHistoryLoaded] = useState(false)
+  const [chatHistoryError, setChatHistoryError] = useState<string | null>(null)
 
   // Export state
   const [showExportMenu, setShowExportMenu] = useState(false)
@@ -424,6 +532,16 @@ export default function ProjectOutputClient({
   const hasGeneratedRef = useRef(false) // Track if we've ever generated in this session
   const sectionRequestRef = useRef<Set<SectionId>>(new Set())
   const lastSyncedViewKeyRef = useRef<string | null>(null)
+  const chatAutoSelectionRef = useRef(false)
+  const resizeStateRef = useRef<{
+    target: 'chat-panel' | 'chat-history' | null
+    startX: number
+    startWidth: number
+  }>({
+    target: null,
+    startX: 0,
+    startWidth: 0,
+  })
 
   const isOverviewReady = useCallback((result: AnalysisResultState | null) => {
     if (!result) return false
@@ -621,11 +739,20 @@ export default function ProjectOutputClient({
     setAnalysisResult(incomingAnalysisResult)
     setAnalysisId(incomingAnalysisId)
     setAnalysisSessionId(incomingAnalysisSessionId)
+    setLegacyAnalysisId(initialLegacyAnalysisId || null)
     setError(null)
     setLoadingSections({})
     setCostIntake(normalizeCostIntakeState((incomingAnalysisResult as any)?.metadata?.cost_intake))
     sectionRequestRef.current.clear()
+    setChatMessages([])
+    setChatSessions([])
+    setActiveChatSessionId(null)
+    setChatInput('')
+    setChatHistoryLoaded(false)
+    setChatHistoryError(null)
+    chatAutoSelectionRef.current = false
   }, [
+    initialLegacyAnalysisId,
     incomingAnalysisId,
     incomingAnalysisResult,
     incomingAnalysisSessionId,
@@ -707,6 +834,7 @@ export default function ProjectOutputClient({
       setAnalysisResult(analysisData)
       setAnalysisId(savedId)
       setAnalysisSessionId(savedSessionId)
+      setLegacyAnalysisId(null)
       setGenerationProgress('')
       
       const provider = analysisData.provider || result.provider || 'unknown'
@@ -770,7 +898,7 @@ export default function ProjectOutputClient({
         (section === 'cost-estimation' ||
           section === 'timeline' ||
           section === 'manpower-planning') &&
-        hasCostIntakeSelections(effectiveCostIntake)
+        hasCostIntakeContent(effectiveCostIntake)
 
       const requestPayload = {
         section,
@@ -865,9 +993,9 @@ export default function ProjectOutputClient({
 
     if (section === 'cost-estimation') {
       const hasCurrentCostData = hasSectionContent('cost-estimation')
-      const hasSelections = hasCostIntakeSelections(costIntake)
-      setShowCostIntake(!hasCurrentCostData || !hasSelections)
-      if (!hasSelections) {
+      const hasCostContext = hasCostIntakeContent(costIntake)
+      setShowCostIntake(!hasCurrentCostData || !hasCostContext)
+      if (!hasCostContext) {
         return
       }
     } else {
@@ -945,6 +1073,367 @@ export default function ProjectOutputClient({
     }
   }, [])
 
+  const normalizeStructuredAnswer = useCallback((value: any): StructuredChatAnswer => ({
+    direct_answer: typeof value?.direct_answer === 'string' ? value.direct_answer : '',
+    key_insights: Array.isArray(value?.key_insights) ? value.key_insights.map(String).filter(Boolean) : [],
+    recommended_action: Array.isArray(value?.recommended_action) ? value.recommended_action.map(String).filter(Boolean) : [],
+    risks_notes: Array.isArray(value?.risks_notes) ? value.risks_notes.map(String).filter(Boolean) : [],
+    next_step: Array.isArray(value?.next_step) ? value.next_step.map(String).filter(Boolean) : [],
+  }), [])
+
+  const clampChatPanelWidth = useCallback((width: number) => {
+    if (typeof window === 'undefined') {
+      return Math.min(CHAT_PANEL_MAX_WIDTH, Math.max(CHAT_PANEL_MIN_WIDTH, width))
+    }
+
+    const viewportSafeMax = Math.max(CHAT_PANEL_MIN_WIDTH, window.innerWidth - 320)
+    return Math.min(Math.min(CHAT_PANEL_MAX_WIDTH, viewportSafeMax), Math.max(CHAT_PANEL_MIN_WIDTH, width))
+  }, [])
+
+  const clampChatHistorySidebarWidth = useCallback((width: number, panelWidth = chatPanelWidth) => {
+    const panelSafeMax = Math.max(
+      CHAT_HISTORY_SIDEBAR_MIN_WIDTH,
+      Math.min(CHAT_HISTORY_SIDEBAR_MAX_WIDTH, panelWidth - 220)
+    )
+    return Math.min(panelSafeMax, Math.max(CHAT_HISTORY_SIDEBAR_MIN_WIDTH, width))
+  }, [chatPanelWidth])
+
+  const startHorizontalResize = useCallback(
+    (target: 'chat-panel' | 'chat-history', event: React.MouseEvent<HTMLDivElement>) => {
+      if (chatFullscreen && target === 'chat-panel') {
+        return
+      }
+
+      event.preventDefault()
+      resizeStateRef.current = {
+        target,
+        startX: event.clientX,
+        startWidth: target === 'chat-panel' ? chatPanelWidth : chatHistorySidebarWidth,
+      }
+      document.body.style.cursor = 'col-resize'
+      document.body.style.userSelect = 'none'
+    },
+    [chatFullscreen, chatHistorySidebarWidth, chatPanelWidth]
+  )
+
+  useEffect(() => {
+    const handleMouseMove = (event: MouseEvent) => {
+      const resizeState = resizeStateRef.current
+      if (!resizeState.target) {
+        return
+      }
+
+      if (resizeState.target === 'chat-panel') {
+        const nextWidth = clampChatPanelWidth(resizeState.startWidth - (event.clientX - resizeState.startX))
+        setChatPanelWidth(nextWidth)
+        setChatHistorySidebarWidth((prev) => clampChatHistorySidebarWidth(prev, nextWidth))
+      } else if (resizeState.target === 'chat-history' && !chatHistorySidebarCollapsed) {
+        const nextWidth = clampChatHistorySidebarWidth(
+          resizeState.startWidth + (event.clientX - resizeState.startX)
+        )
+        setChatHistorySidebarWidth(nextWidth)
+      }
+    }
+
+    const handleMouseUp = () => {
+      if (!resizeStateRef.current.target) {
+        return
+      }
+
+      resizeStateRef.current = {
+        target: null,
+        startX: 0,
+        startWidth: 0,
+      }
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+
+    const handleWindowResize = () => {
+      setChatPanelWidth((prev) => clampChatPanelWidth(prev))
+      setChatHistorySidebarWidth((prev) =>
+        clampChatHistorySidebarWidth(prev, clampChatPanelWidth(chatPanelWidth))
+      )
+    }
+
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+    window.addEventListener('resize', handleWindowResize)
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+      window.removeEventListener('resize', handleWindowResize)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+  }, [
+    chatFullscreen,
+    chatHistorySidebarCollapsed,
+    chatPanelWidth,
+    clampChatHistorySidebarWidth,
+    clampChatPanelWidth,
+  ])
+
+  useEffect(() => {
+    if (!chatPanelOpen || chatFullscreen) {
+      return
+    }
+
+    setChatPanelWidth((prev) => clampChatPanelWidth(prev))
+    setChatHistorySidebarWidth((prev) => clampChatHistorySidebarWidth(prev))
+  }, [chatFullscreen, chatPanelOpen, clampChatHistorySidebarWidth, clampChatPanelWidth])
+
+  const activeChatSession =
+    chatSessions.find((session) => session.id === activeChatSessionId) || null
+
+  const loadChatMessages = useCallback(async (sessionId: string) => {
+    setIsChatSessionLoading(true)
+
+    try {
+      const supabase = createClientSupabaseClient()
+      const { data, error } = await supabase
+        .from('analysis_followup_messages')
+        .select('role, content, structured_payload, created_at')
+        .eq('session_id', sessionId)
+        .order('created_at', { ascending: true })
+
+      if (error) {
+        throw error
+      }
+
+      const nextMessages: ChatPanelMessage[] = (data || [])
+        .filter((message: any) => message.role === 'user' || message.role === 'assistant')
+        .map((message: any) => ({
+          role: message.role,
+          content: message.content || '',
+          structured: message.structured_payload
+            ? normalizeStructuredAnswer(message.structured_payload)
+            : null,
+        }))
+
+      setChatMessages(nextMessages)
+      setChatHistoryError(null)
+    } catch (historyError) {
+      console.error('Failed to load follow-up messages:', historyError)
+      setChatHistoryError('Unable to load this follow-up history right now.')
+      setChatMessages([])
+    } finally {
+      setIsChatSessionLoading(false)
+    }
+  }, [normalizeStructuredAnswer])
+
+  const loadChatSessions = useCallback(async () => {
+    if (!analysisSessionId && !legacyAnalysisId) {
+      setChatSessions([])
+      setChatHistoryLoaded(true)
+      setChatHistoryError(null)
+      return
+    }
+
+    setIsChatHistoryLoading(true)
+
+    try {
+      const supabase = createClientSupabaseClient()
+      let query = supabase
+        .from('analysis_followup_sessions')
+        .select('id, title, active_section, message_count, created_at, updated_at, last_message_at')
+        .eq('project_id', project.id)
+
+      if (analysisSessionId && legacyAnalysisId && analysisSessionId !== legacyAnalysisId) {
+        query = query.or(
+          `analysis_session_id.eq.${analysisSessionId},legacy_analysis_id.eq.${legacyAnalysisId}`
+        )
+      } else if (analysisSessionId) {
+        query = query.eq('analysis_session_id', analysisSessionId)
+      } else if (legacyAnalysisId) {
+        query = query.eq('legacy_analysis_id', legacyAnalysisId)
+      }
+
+      const { data, error } = await query.order('last_message_at', { ascending: false })
+
+      if (error) {
+        throw error
+      }
+
+      const nextSessions: FollowUpSessionSummary[] = (data || []).map((session: any) => ({
+        id: session.id,
+        title: session.title || `Follow-up - ${project.name}`,
+        active_section: (session.active_section || 'all') as SectionId,
+        message_count: Number(session.message_count) || 0,
+        created_at: session.created_at,
+        updated_at: session.updated_at || session.created_at,
+        last_message_at: session.last_message_at || session.updated_at || session.created_at,
+      }))
+
+      setChatSessions(nextSessions)
+      setChatHistoryLoaded(true)
+      setChatHistoryError(null)
+
+      if (
+        !chatAutoSelectionRef.current &&
+        !activeChatSessionId &&
+        chatMessages.length === 0 &&
+        nextSessions.length > 0
+      ) {
+        chatAutoSelectionRef.current = true
+        setActiveChatSessionId(nextSessions[0].id)
+      }
+
+      if (activeChatSessionId && !nextSessions.some((session) => session.id === activeChatSessionId)) {
+        setActiveChatSessionId(null)
+        setChatMessages([])
+      }
+    } catch (historyError) {
+      console.error('Failed to load follow-up sessions:', historyError)
+      setChatHistoryLoaded(true)
+      setChatHistoryError(
+        'Follow-up history is unavailable until the new Supabase chat migration is applied.'
+      )
+      setChatSessions([])
+    } finally {
+      setIsChatHistoryLoading(false)
+    }
+  }, [activeChatSessionId, analysisSessionId, chatMessages.length, legacyAnalysisId, project.id, project.name])
+
+  useEffect(() => {
+    if (!chatPanelOpen || chatHistoryLoaded) {
+      return
+    }
+
+    void loadChatSessions()
+  }, [chatHistoryLoaded, chatPanelOpen, loadChatSessions])
+
+  useEffect(() => {
+    if (!chatPanelOpen || !activeChatSessionId) {
+      return
+    }
+
+    void loadChatMessages(activeChatSessionId)
+  }, [activeChatSessionId, chatPanelOpen, loadChatMessages])
+
+  const startNewFollowUpChat = useCallback(() => {
+    chatAutoSelectionRef.current = true
+    setActiveChatSessionId(null)
+    setChatMessages([])
+    setChatInput('')
+    setChatHistoryError(null)
+  }, [])
+
+  const persistFollowUpConversation = useCallback(async (
+    userMessage: string,
+    assistantMessage: string,
+    structuredAnswer: StructuredChatAnswer | null
+  ) => {
+    const supabase = createClientSupabaseClient()
+    const messageTimestamp = Date.now()
+    const userCreatedAt = new Date(messageTimestamp).toISOString()
+    const assistantCreatedAt = new Date(messageTimestamp + 1).toISOString()
+
+    let sessionId = activeChatSessionId
+    let sessionTitle = activeChatSession?.title || deriveFollowUpTitle(userMessage, project.name)
+
+    if (!sessionId) {
+      const { data: createdSession, error: sessionError } = await supabase
+        .from('analysis_followup_sessions')
+        .insert({
+          project_id: project.id,
+          user_id: user.id,
+          analysis_session_id: analysisSessionId,
+          legacy_analysis_id: legacyAnalysisId,
+          title: sessionTitle,
+          active_section: activeSection,
+          analysis_title:
+            (analysisResult?.metadata?.session_title as string | undefined) || project.name,
+          source_input:
+            (analysisResult?.metadata?.source_input as string | undefined) || initialInput || '',
+          last_message_at: assistantCreatedAt,
+        })
+        .select('id, title, active_section, message_count, created_at, updated_at, last_message_at')
+        .single()
+
+      if (sessionError) {
+        throw sessionError
+      }
+
+      sessionId = createdSession.id
+      sessionTitle = createdSession.title || sessionTitle
+      setActiveChatSessionId(sessionId)
+    }
+
+    const { error: messageError } = await supabase
+      .from('analysis_followup_messages')
+      .insert([
+        {
+          session_id: sessionId,
+          project_id: project.id,
+          user_id: user.id,
+          role: 'user',
+          content: userMessage,
+          section_id: activeSection,
+          created_at: userCreatedAt,
+        },
+        {
+          session_id: sessionId,
+          project_id: project.id,
+          user_id: user.id,
+          role: 'assistant',
+          content: assistantMessage,
+          structured_payload: structuredAnswer,
+          section_id: activeSection,
+          created_at: assistantCreatedAt,
+        },
+      ])
+
+    if (messageError) {
+      throw messageError
+    }
+
+    const { error: sessionUpdateError } = await supabase
+      .from('analysis_followup_sessions')
+      .update({
+        active_section: activeSection,
+        last_message_at: assistantCreatedAt,
+      })
+      .eq('id', sessionId)
+
+    if (sessionUpdateError) {
+      throw sessionUpdateError
+    }
+
+    if (!sessionId) {
+      throw new Error('Failed to resolve follow-up session id')
+    }
+
+    const existingSession = chatSessions.find((session) => session.id === sessionId)
+    const nextSession: FollowUpSessionSummary = {
+      id: sessionId,
+      title: sessionTitle,
+      active_section: activeSection,
+      message_count: (existingSession?.message_count || 0) + 2,
+      created_at: existingSession?.created_at || userCreatedAt,
+      updated_at: assistantCreatedAt,
+      last_message_at: assistantCreatedAt,
+    }
+
+    setChatSessions((prev) => [
+      nextSession,
+      ...prev.filter((session) => session.id !== sessionId),
+    ])
+  }, [
+    activeChatSession,
+    activeChatSessionId,
+    activeSection,
+    analysisResult,
+    analysisSessionId,
+    chatSessions,
+    initialInput,
+    legacyAnalysisId,
+    project.id,
+    project.name,
+    user.id,
+  ])
+
   const handleChatSubmit = async () => {
     if (!chatInput.trim() || isChatStreaming) return
 
@@ -984,14 +1473,6 @@ export default function ProjectOutputClient({
       let sseBuffer = ''
       setChatMessages(prev => [...prev, { role: 'assistant', content: '', structured: null }])
 
-      const normalizeStructured = (value: any): StructuredChatAnswer => ({
-        direct_answer: typeof value?.direct_answer === 'string' ? value.direct_answer : '',
-        key_insights: Array.isArray(value?.key_insights) ? value.key_insights.map(String).filter(Boolean) : [],
-        recommended_action: Array.isArray(value?.recommended_action) ? value.recommended_action.map(String).filter(Boolean) : [],
-        risks_notes: Array.isArray(value?.risks_notes) ? value.risks_notes.map(String).filter(Boolean) : [],
-        next_step: Array.isArray(value?.next_step) ? value.next_step.map(String).filter(Boolean) : [],
-      })
-
       const updateAssistantMessage = () => {
         setChatMessages(prev => {
           const updated = [...prev]
@@ -1022,7 +1503,7 @@ export default function ProjectOutputClient({
           }
 
           if (parsed.structured && typeof parsed.structured === 'object') {
-            structuredAnswer = normalizeStructured(parsed.structured)
+            structuredAnswer = normalizeStructuredAnswer(parsed.structured)
           }
 
           if (parsed.error) {
@@ -1052,22 +1533,14 @@ export default function ProjectOutputClient({
         handleSseEvent(sseBuffer)
       }
 
-      // Save chat to database after completion
       try {
-        const supabase = createClientSupabaseClient()
-        await supabase
-          .from('chat_history')
-          .insert({
-            project_id: project.id,
-            user_id: user.id,
-            user_message: userMessage,
-            assistant_message: assistantMessage,
-            section: activeSection,
-            created_at: new Date().toISOString(),
-          })
-      } catch (dbError) {
-        console.error('Failed to save chat to database:', dbError)
-        // Don't show error to user, just log it
+        await persistFollowUpConversation(userMessage, assistantMessage, structuredAnswer)
+      } catch (historyError) {
+        console.error('Failed to save follow-up history:', historyError)
+        showToast(
+          'Answer is ready, but follow-up history could not be saved. Apply the new Supabase migration first.',
+          'error'
+        )
       }
 
     } catch (err) {
@@ -1301,14 +1774,14 @@ export default function ProjectOutputClient({
     if (analysisResult.cost_planning) {
       content += `## Cost Estimation\n\n`
       if (analysisResult.cost_planning.total_first_year_cost_inr) {
-        content += `**Total First Year Cost:** ₹${analysisResult.cost_planning.total_first_year_cost_inr.toLocaleString('en-IN')}\n\n`
+        content += `**Total First Year Cost:** â‚¹${analysisResult.cost_planning.total_first_year_cost_inr.toLocaleString('en-IN')}\n\n`
       }
       if (analysisResult.cost_planning.development_phase_cost_inr) {
         content += `### Development Phase Costs\n`
         const devCosts = analysisResult.cost_planning.development_phase_cost_inr
-        if (devCosts.mvp) content += `- **MVP:** ₹${devCosts.mvp.toLocaleString('en-IN')}\n`
-        if (devCosts.growth) content += `- **Growth:** ₹${devCosts.growth.toLocaleString('en-IN')}\n`
-        if (devCosts.scale) content += `- **Scale:** ₹${devCosts.scale.toLocaleString('en-IN')}\n`
+        if (devCosts.mvp) content += `- **MVP:** â‚¹${devCosts.mvp.toLocaleString('en-IN')}\n`
+        if (devCosts.growth) content += `- **Growth:** â‚¹${devCosts.growth.toLocaleString('en-IN')}\n`
+        if (devCosts.scale) content += `- **Scale:** â‚¹${devCosts.scale.toLocaleString('en-IN')}\n`
         content += `\n`
       }
     }
@@ -1432,8 +1905,8 @@ export default function ProjectOutputClient({
       .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // Remove links
       .replace(/```[\s\S]*?```/g, '') // Remove code blocks
       .replace(/`([^`]+)`/g, '$1') // Remove inline code
-      .replace(/^\s*[-+*]\s+/gm, '• ') // Convert lists
-      .replace(/^\s*\d+\.\s+/gm, '• ') // Convert numbered lists
+      .replace(/^\s*[-+*]\s+/gm, 'â€¢ ') // Convert lists
+      .replace(/^\s*\d+\.\s+/gm, 'â€¢ ') // Convert numbered lists
       .replace(/\n\n\n+/g, '\n\n') // Normalize spacing
       .trim()
 
@@ -1637,6 +2110,7 @@ ${content
             data={analysisResult}
             onSectionClick={handleSectionChange}
             hasSectionContent={hasSectionContent}
+            isSectionFresh={isSectionFresh}
             loadingSections={loadingSections}
           />
         )
@@ -1901,18 +2375,31 @@ ${content
           </div>
         </main>
 
+        {chatPanelOpen && !chatFullscreen && (
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize ask follow-up panel"
+            onMouseDown={(event) => startHorizontalResize('chat-panel', event)}
+            className="group relative w-2 cursor-col-resize bg-transparent flex-shrink-0"
+          >
+            <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-gray-200 dark:bg-gray-800 group-hover:bg-blue-400 transition-colors" />
+            <div className="absolute inset-y-0 left-1/2 w-1 -translate-x-1/2 bg-blue-500/0 group-hover:bg-blue-500/20 transition-colors" />
+          </div>
+        )}
+
         {/* Right Chat Panel */}
         <AnimatePresence>
           {chatPanelOpen && (
             <motion.aside
               initial={{ width: 0, opacity: 0 }}
               animate={{
-                width: chatFullscreen ? '100vw' : 400,
+                width: chatFullscreen ? '100vw' : chatPanelWidth,
                 opacity: 1
               }}
               exit={{ width: 0, opacity: 0 }}
               transition={{ duration: 0.3 }}
-              className={`sticky top-0 h-screen flex flex-col
+              className={`sticky top-0 h-screen flex flex-col flex-shrink-0
                 bg-white dark:bg-gray-900
                 border-l border-gray-200 dark:border-gray-800
                 overflow-hidden z-50
@@ -1921,13 +2408,17 @@ ${content
                   : 'relative'
                 }`}
             >
-              {/* Chat Header */}
               <div className="h-16 flex items-center justify-between px-4 border-b border-gray-200 dark:border-gray-800">
-                <div className="flex items-center gap-2">
-                  <MessageSquare className="w-5 h-5 text-blue-500" />
-                  <h2 className="font-semibold text-gray-900 dark:text-white">
-                    {chatFullscreen ? 'AI Assistant (Fullscreen)' : 'Ask Follow-up'}
-                  </h2>
+                <div className="flex items-center gap-3 min-w-0">
+                  <MessageSquare className="w-5 h-5 text-blue-500 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <h2 className="font-semibold text-gray-900 dark:text-white">
+                      {chatFullscreen ? 'Ask Follow-up (Fullscreen)' : 'Ask Follow-up'}
+                    </h2>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                      {activeChatSession?.title || 'New chat'}
+                    </p>
+                  </div>
                 </div>
                 <div className="flex items-center gap-1">
                   <button
@@ -1943,7 +2434,6 @@ ${content
                     )}
                   </button>
 
-                  {/* Zoom Controls */}
                   <button
                     onClick={() => setChatZoomLevel(prev => Math.min(1.5, prev + 0.1))}
                     className="p-2 rounded-lg text-gray-400 hover:text-gray-600
@@ -1966,7 +2456,6 @@ ${content
                     <ZoomOut className="w-4 h-4" />
                   </button>
 
-                  {/* Reset Zoom (when not at 1.0) */}
                   {chatZoomLevel !== 1 && (
                     <button
                       onClick={() => setChatZoomLevel(1)}
@@ -1995,129 +2484,272 @@ ${content
                 </div>
               </div>
 
-              {/* Chat Messages */}
-              <div className={`flex-1 overflow-y-auto p-4 space-y-4 ${
-                chatFullscreen ? 'max-w-4xl mx-auto w-full p-6' : ''
-              }`}>
-                {chatMessages.length === 0 && (
-                  <div className="flex flex-col items-center justify-center h-full text-center px-4">
-                    <Sparkles className="w-12 h-12 text-blue-500 mb-4" />
-                    <p className="text-gray-900 dark:text-white font-medium mb-2">
-                      Ask anything about the analysis
-                    </p>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
-                      {chatFullscreen
-                        ? 'Get detailed analysis, comparisons, and strategic insights'
-                        : 'Get clarifications, request expansions, or explore different tech stacks'
-                      }
-                    </p>
-                  </div>
-                )}
-                {chatMessages.map((msg, index) => (
-                  <div
-                    key={index}
-                    className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                  >
-                    <div className={`${chatFullscreen ? 'max-w-[80%]' : 'max-w-[85%]'} px-4 py-3 rounded-2xl
-                      ${msg.role === 'user'
-                        ? 'bg-blue-500 text-white'
-                        : 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white'
-                      }`}>
-                      {msg.role === 'assistant' ? (
-                        msg.structured ? (
-                          <StructuredAnswerView
-                            answer={msg.structured}
-                            markdown={msg.content}
-                            compact={!chatFullscreen}
-                          />
-                        ) : (
-                          <ReactMarkdown
-                            className={`prose dark:prose-invert max-w-none
-                              prose-headings:font-semibold prose-headings:mt-4 prose-headings:mb-2
-                              prose-p:my-2 prose-p:leading-relaxed
-                              prose-ul:my-2 prose-ol:my-2 prose-li:my-1
-                              prose-strong:font-semibold prose-strong:text-gray-900 dark:prose-strong:text-white
-                              prose-code:bg-gray-200 dark:prose-code:bg-gray-700 prose-code:px-1 prose-code:py-0.5 prose-code:rounded
-                              prose-pre:bg-gray-200 dark:prose-pre:bg-gray-700 prose-pre:p-3 prose-pre:rounded-lg
-                              prose-table:border-collapse prose-table:w-full
-                              prose-th:border prose-th:border-gray-300 dark:prose-th:border-gray-600 prose-th:p-2 prose-th:bg-gray-100 dark:prose-th:bg-gray-800
-                              prose-td:border prose-td:border-gray-300 dark:prose-td:border-gray-600 prose-td:p-2
-                              prose-a:text-blue-600 hover:prose-a:text-blue-700
-                              ${chatFullscreen
-                                ? 'prose-lg prose-h1:text-2xl prose-h2:text-xl prose-h3:text-lg'
-                                : 'prose-sm prose-h1:text-xl prose-h2:text-lg prose-h3:text-base'
-                              }`}
-                          >
-                            {msg.content}
-                          </ReactMarkdown>
-                        )
-                      ) : (
-                        <p className={`whitespace-pre-wrap ${chatFullscreen ? 'text-base' : 'text-sm'}`}>
-                          {msg.content}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                ))}
-                {isChatStreaming && (
-                  <div className="flex items-center gap-2 text-gray-500">
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span className="text-sm">Thinking...</span>
-                  </div>
-                )}
-              </div>
-
-              {/* Chat Input */}
-              <div className={`p-4 border-t border-gray-200 dark:border-gray-800 ${
-                chatFullscreen ? 'max-w-4xl mx-auto w-full px-6' : ''
-              }`}>
-                <div className="flex items-end gap-3">
-                  <textarea
-                    ref={chatInputRef}
-                    value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault()
-                        handleChatSubmit()
-                      }
-                    }}
-                    placeholder={chatFullscreen
-                      ? "Ask detailed questions about the analysis, request comparisons, or explore strategic options..."
-                      : "Ask about the analysis..."
-                    }
-                    rows={chatFullscreen ? 4 : 3}
-                    className={`flex-1 px-4 py-3 rounded-xl
-                      bg-gray-100 dark:bg-gray-800
-                      border border-gray-200 dark:border-gray-700
-                      text-gray-900 dark:text-white
-                      placeholder-gray-500
-                      focus:outline-none focus:ring-2 focus:ring-blue-500
-                      resize-none
-                      ${chatFullscreen ? 'text-base' : 'text-sm'}`}
-                  />
-                  <button
-                    onClick={handleChatSubmit}
-                    disabled={!chatInput.trim() || isChatStreaming}
-                    className={`rounded-xl
-                      bg-blue-500 hover:bg-blue-600
-                      text-white disabled:opacity-50
-                      transition-colors
-                      ${chatFullscreen ? 'p-4' : 'p-3'}`}
-                  >
-                    {isChatStreaming ? (
-                      <Loader2 className={`animate-spin ${chatFullscreen ? 'w-6 h-6' : 'w-5 h-5'}`} />
+              <div className="flex flex-1 min-h-0">
+                <div
+                  className="flex flex-col border-r border-gray-200 dark:border-gray-800 bg-gray-50/70 dark:bg-gray-950/40 overflow-hidden flex-shrink-0"
+                  style={{
+                    width: chatHistorySidebarCollapsed
+                      ? CHAT_HISTORY_SIDEBAR_COLLAPSED_WIDTH
+                      : chatHistorySidebarWidth,
+                  }}
+                >
+                  <div className="p-3 border-b border-gray-200 dark:border-gray-800">
+                    {chatHistorySidebarCollapsed ? (
+                      <div className="flex flex-col items-center gap-2">
+                        <button
+                          onClick={startNewFollowUpChat}
+                          disabled={isChatStreaming}
+                          className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                          title="New chat"
+                        >
+                          <Plus className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => setChatHistorySidebarCollapsed(false)}
+                          className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                          title="Expand saved follow-ups"
+                        >
+                          <ChevronRight className="w-4 h-4" />
+                        </button>
+                      </div>
                     ) : (
-                      <Send className={chatFullscreen ? 'w-6 h-6' : 'w-5 h-5'} />
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={startNewFollowUpChat}
+                          disabled={isChatStreaming}
+                          className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                        >
+                          <Plus className="w-4 h-4" />
+                          <span>New chat</span>
+                        </button>
+                        <button
+                          onClick={() => setChatHistorySidebarCollapsed(true)}
+                          className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                          title="Collapse saved follow-ups"
+                        >
+                          <ChevronLeft className="w-4 h-4" />
+                        </button>
+                      </div>
                     )}
-                  </button>
+                  </div>
+
+                  {chatHistorySidebarCollapsed ? (
+                    <div className="flex-1 overflow-y-auto p-2">
+                      <div className="flex flex-col items-center gap-2">
+                        <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400">
+                          <History className="w-4 h-4" />
+                        </div>
+                        <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400">
+                          {chatSessions.length}
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex-1 overflow-y-auto p-2 space-y-2">
+                      <p className="px-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                        Saved follow-ups
+                      </p>
+
+                      {isChatHistoryLoading && (
+                        <div className="flex items-center gap-2 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3 text-sm text-gray-500 dark:text-gray-400">
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>Loading history...</span>
+                        </div>
+                      )}
+
+                      {!isChatHistoryLoading && chatHistoryError && (
+                        <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-3 text-xs leading-relaxed text-amber-700 dark:text-amber-300">
+                          {chatHistoryError}
+                        </div>
+                      )}
+
+                      {!isChatHistoryLoading && !chatHistoryError && chatSessions.length === 0 && (
+                        <div className="rounded-xl border border-dashed border-gray-200 dark:border-gray-700 p-4 text-sm text-gray-500 dark:text-gray-400">
+                          Your saved follow-up chats will appear here.
+                        </div>
+                      )}
+
+                      {chatSessions.map((session) => {
+                        const isActiveSession = session.id === activeChatSessionId
+                        const sectionLabel = SECTIONS.find((item) => item.id === session.active_section)?.label || 'All Sections'
+                        const turnCount = Math.max(1, Math.round(session.message_count / 2))
+
+                        return (
+                          <button
+                            key={session.id}
+                            onClick={() => {
+                              chatAutoSelectionRef.current = true
+                              setActiveChatSessionId(session.id)
+                              setChatInput('')
+                              setChatHistoryError(null)
+                            }}
+                            disabled={isChatStreaming}
+                            className={`w-full rounded-2xl border px-3 py-3 text-left transition-colors disabled:opacity-60 ${isActiveSession
+                              ? 'border-blue-300 bg-blue-50 dark:border-blue-700 dark:bg-blue-900/20'
+                              : 'border-gray-200 bg-white hover:border-gray-300 dark:border-gray-800 dark:bg-gray-900 dark:hover:border-gray-700'
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <p className={`text-sm font-medium leading-snug ${isActiveSession ? 'text-blue-700 dark:text-blue-300' : 'text-gray-900 dark:text-white'}`}>
+                                {session.title}
+                              </p>
+                              <Clock3 className="w-3.5 h-3.5 text-gray-400 flex-shrink-0 mt-0.5" />
+                            </div>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                              {formatFollowUpTimestamp(session.last_message_at)} • {sectionLabel}
+                            </p>
+                            <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                              {turnCount} saved turn{turnCount > 1 ? 's' : ''}
+                            </p>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
                 </div>
-                {chatFullscreen && (
-                  <p className="text-xs text-gray-500 mt-2 text-center">
-                    Press <kbd className="px-1 py-0.5 bg-gray-200 dark:bg-gray-700 rounded">Enter</kbd> to send,{' '}
-                    <kbd className="px-1 py-0.5 bg-gray-200 dark:bg-gray-700 rounded">Shift+Enter</kbd> for new line
-                  </p>
+
+                {!chatHistorySidebarCollapsed && (
+                  <div
+                    role="separator"
+                    aria-orientation="vertical"
+                    aria-label="Resize follow-up history sidebar"
+                    onMouseDown={(event) => startHorizontalResize('chat-history', event)}
+                    className="group relative w-2 cursor-col-resize bg-transparent flex-shrink-0"
+                  >
+                    <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-gray-200 dark:bg-gray-800 group-hover:bg-blue-400 transition-colors" />
+                    <div className="absolute inset-y-0 left-1/2 w-1 -translate-x-1/2 bg-blue-500/0 group-hover:bg-blue-500/20 transition-colors" />
+                  </div>
                 )}
+
+                <div className="flex-1 flex flex-col min-w-0" style={{ zoom: chatZoomLevel }}>
+                  <div className={`flex-1 overflow-y-auto p-4 space-y-4 ${chatFullscreen ? 'p-6' : ''}`}>
+                    {isChatSessionLoading ? (
+                      <div className="flex items-center justify-center h-full text-gray-500 dark:text-gray-400 gap-2">
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                        <span className="text-sm">Loading follow-up...</span>
+                      </div>
+                    ) : chatMessages.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center h-full text-center px-4">
+                        <Sparkles className="w-12 h-12 text-blue-500 mb-4" />
+                        <p className="text-gray-900 dark:text-white font-medium mb-2">
+                          Ask anything about the analysis
+                        </p>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">
+                          {chatFullscreen
+                            ? 'Open any saved follow-up on the left, or start a new one and keep the conversation history.'
+                            : 'Use the left history rail like ChatGPT, or start a new follow-up for this analysis.'
+                          }
+                        </p>
+                      </div>
+                    ) : (
+                      <>
+                        {chatMessages.map((msg, index) => (
+                          <div
+                            key={index}
+                            className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                          >
+                            <div className={`${chatFullscreen ? 'max-w-[82%]' : 'max-w-[88%]'} px-4 py-3 rounded-2xl
+                              ${msg.role === 'user'
+                                ? 'bg-blue-500 text-white'
+                                : 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white'
+                              }`}>
+                              {msg.role === 'assistant' ? (
+                                msg.structured ? (
+                                  <StructuredAnswerView
+                                    answer={msg.structured}
+                                    markdown={msg.content}
+                                    compact={!chatFullscreen}
+                                  />
+                                ) : (
+                                  <ReactMarkdown
+                                    className={`prose dark:prose-invert max-w-none
+                                      prose-headings:font-semibold prose-headings:mt-4 prose-headings:mb-2
+                                      prose-p:my-2 prose-p:leading-relaxed
+                                      prose-ul:my-2 prose-ol:my-2 prose-li:my-1
+                                      prose-strong:font-semibold prose-strong:text-gray-900 dark:prose-strong:text-white
+                                      prose-code:bg-gray-200 dark:prose-code:bg-gray-700 prose-code:px-1 prose-code:py-0.5 prose-code:rounded
+                                      prose-pre:bg-gray-200 dark:prose-pre:bg-gray-700 prose-pre:p-3 prose-pre:rounded-lg
+                                      prose-table:border-collapse prose-table:w-full
+                                      prose-th:border prose-th:border-gray-300 dark:prose-th:border-gray-600 prose-th:p-2 prose-th:bg-gray-100 dark:prose-th:bg-gray-800
+                                      prose-td:border prose-td:border-gray-300 dark:prose-td:border-gray-600 prose-td:p-2
+                                      prose-a:text-blue-600 hover:prose-a:text-blue-700
+                                      ${chatFullscreen
+                                        ? 'prose-lg prose-h1:text-2xl prose-h2:text-xl prose-h3:text-lg'
+                                        : 'prose-sm prose-h1:text-xl prose-h2:text-lg prose-h3:text-base'
+                                      }`}
+                                  >
+                                    {msg.content}
+                                  </ReactMarkdown>
+                                )
+                              ) : (
+                                <p className={`whitespace-pre-wrap ${chatFullscreen ? 'text-base' : 'text-sm'}`}>
+                                  {msg.content}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </>
+                    )}
+
+                    {isChatStreaming && (
+                      <div className="flex items-center gap-2 text-gray-500">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span className="text-sm">Thinking...</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="p-4 border-t border-gray-200 dark:border-gray-800">
+                    <div className="flex items-end gap-3">
+                      <textarea
+                        ref={chatInputRef}
+                        value={chatInput}
+                        onChange={(e) => setChatInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault()
+                            handleChatSubmit()
+                          }
+                        }}
+                        placeholder={chatFullscreen
+                          ? 'Ask detailed questions about the analysis, request comparisons, or explore strategic options...'
+                          : 'Ask about the analysis...'
+                        }
+                        rows={chatFullscreen ? 4 : 3}
+                        className={`flex-1 px-4 py-3 rounded-xl
+                          bg-gray-100 dark:bg-gray-800
+                          border border-gray-200 dark:border-gray-700
+                          text-gray-900 dark:text-white
+                          placeholder-gray-500
+                          focus:outline-none focus:ring-2 focus:ring-blue-500
+                          resize-none
+                          ${chatFullscreen ? 'text-base' : 'text-sm'}`}
+                      />
+                      <button
+                        onClick={handleChatSubmit}
+                        disabled={!chatInput.trim() || isChatStreaming}
+                        className={`rounded-xl
+                          bg-blue-500 hover:bg-blue-600
+                          text-white disabled:opacity-50
+                          transition-colors
+                          ${chatFullscreen ? 'p-4' : 'p-3'}`}
+                      >
+                        {isChatStreaming ? (
+                          <Loader2 className={`animate-spin ${chatFullscreen ? 'w-6 h-6' : 'w-5 h-5'}`} />
+                        ) : (
+                          <Send className={chatFullscreen ? 'w-6 h-6' : 'w-5 h-5'} />
+                        )}
+                      </button>
+                    </div>
+                    {chatFullscreen && (
+                      <p className="text-xs text-gray-500 mt-2 text-center">
+                        Press <kbd className="px-1 py-0.5 bg-gray-200 dark:bg-gray-700 rounded">Enter</kbd> to send,{' '}
+                        <kbd className="px-1 py-0.5 bg-gray-200 dark:bg-gray-700 rounded">Shift+Enter</kbd> for new line
+                      </p>
+                    )}
+                  </div>
+                </div>
               </div>
             </motion.aside>
           )}
@@ -3217,7 +3849,7 @@ function ManpowerPlanningSection({ data }: { data: any }) {
         <MetricCard label="Team Size" value={data.total_team_size || 'TBD'} color="blue" />
         <MetricCard
           label="Monthly Cost"
-          value={`₹${((data.total_monthly_cost_inr || 0) / 100000).toFixed(1)}L`}
+          value={`â‚¹${((data.total_monthly_cost_inr || 0) / 100000).toFixed(1)}L`}
           color="emerald"
         />
         <MetricCard label="Must-have Roles" value={rolesRationale.filter((item: any) => item.must_have).length || 0} color="purple" />
@@ -3231,7 +3863,7 @@ function ManpowerPlanningSection({ data }: { data: any }) {
               <div key={i} className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl flex items-center justify-between">
                 <div>
                   <h4 className="font-medium text-gray-900 dark:text-white">{member.role}</h4>
-                  <p className="text-sm text-gray-500">{member.seniority} • {member.count} person(s)</p>
+                  <p className="text-sm text-gray-500">{member.seniority} â€¢ {member.count} person(s)</p>
                   {member.why_needed && (
                     <p className="text-xs text-gray-500 mt-1">{member.why_needed}</p>
                   )}
@@ -3240,7 +3872,7 @@ function ManpowerPlanningSection({ data }: { data: any }) {
                   )}
                 </div>
                 <span className="font-medium text-emerald-600">
-                  ₹{((member.monthly_cost_inr || 0) / 1000).toFixed(0)}K/mo
+                  â‚¹{((member.monthly_cost_inr || 0) / 1000).toFixed(0)}K/mo
                 </span>
               </div>
             ))}
@@ -3300,7 +3932,7 @@ function ManpowerPlanningSection({ data }: { data: any }) {
               return (
                 <div key={item.key} className="p-4 rounded-xl border border-gray-200 dark:border-gray-700">
                   <p className="text-sm font-semibold text-gray-900 dark:text-white">{item.label}</p>
-                  <p className="text-xs text-gray-500 mt-1">{headcount} people • ₹{(monthly / 100000).toFixed(1)}L/month</p>
+                  <p className="text-xs text-gray-500 mt-1">{headcount} people â€¢ â‚¹{(monthly / 100000).toFixed(1)}L/month</p>
                 </div>
               )
             })}
@@ -3342,7 +3974,7 @@ function ResourcesSection({ data }: { data: any }) {
                   <p className="text-sm text-gray-500">{item.purpose}</p>
                 </div>
                 <span className="font-medium text-blue-600">
-                  ₹{((item.monthly_cost_inr || 0) / 1000).toFixed(0)}K/mo
+                  â‚¹{((item.monthly_cost_inr || 0) / 1000).toFixed(0)}K/mo
                 </span>
               </div>
             ))}
@@ -3360,7 +3992,7 @@ function ResourcesSection({ data }: { data: any }) {
                   <p className="text-sm text-gray-500">{item.purpose}</p>
                 </div>
                 <span className="font-medium text-purple-600">
-                  ₹{((item.monthly_cost_inr || 0) / 1000).toFixed(0)}K/mo
+                  â‚¹{((item.monthly_cost_inr || 0) / 1000).toFixed(0)}K/mo
                 </span>
               </div>
             ))}
@@ -3390,6 +4022,9 @@ function CostEstimationSection({
 }) {
   const totalFirstYear = data?.total_first_year || data?.total_first_year_cost_inr || 0
   const hasData = Boolean(data)
+  const [showAdvancedIntake, setShowAdvancedIntake] = useState(() =>
+    hasCostIntakeSelections(costIntake)
+  )
 
   const updateField = (
     sectionId: keyof Omit<CostIntakeState, 'notes'>,
@@ -3406,6 +4041,13 @@ function CostEstimationSection({
   }
 
   const shouldShowIntake = showIntake || !hasData
+  const advancedSelectionCount = getCostIntakeSelectionCount(costIntake)
+
+  useEffect(() => {
+    if (hasCostIntakeSelections(costIntake)) {
+      setShowAdvancedIntake(true)
+    }
+  }, [costIntake])
 
   return (
     <div className="space-y-8">
@@ -3414,38 +4056,17 @@ function CostEstimationSection({
       {shouldShowIntake && (
         <ContentCard title="Cost Drivers Intake">
           <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-            Select the factors that best match your product. Cost estimation is generated after this intake so numbers are tied to real scope and assumptions.
+            Add a quick project brief for the simple path, or expand the advanced inputs when you want more control. Cost estimation can be generated from either one.
           </p>
 
-          <div className="space-y-6 max-h-[60vh] overflow-y-auto pr-1">
-            {COST_INTAKE_SECTIONS.map((section) => (
-              <div key={section.id} className="p-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/70 dark:bg-gray-800/40">
-                <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">{section.title}</h4>
-                <div className="grid md:grid-cols-2 gap-3">
-                  {section.fields.map((field) => (
-                    <label key={field.key} className="flex flex-col gap-1">
-                      <span className="text-xs font-medium text-gray-600 dark:text-gray-300">{field.label}</span>
-                      <select
-                        value={costIntake[section.id]?.[field.key] || ''}
-                        onChange={(e) => updateField(section.id, field.key, e.target.value)}
-                        className="px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      >
-                        <option value="">Select...</option>
-                        {field.options.map((option) => (
-                          <option key={option} value={option}>{option}</option>
-                        ))}
-                      </select>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            ))}
-
-            <div>
-              <label className="flex flex-col gap-1">
-                <span className="text-xs font-medium text-gray-600 dark:text-gray-300">Optional notes for pricing assumptions</span>
+          <div className="space-y-5">
+            <div className="rounded-2xl border border-blue-200 dark:border-blue-800/60 bg-blue-50/70 dark:bg-blue-900/10 p-4">
+              <label className="flex flex-col gap-2">
+                <span className="text-sm font-semibold text-gray-900 dark:text-white">
+                  Quick project brief (recommended)
+                </span>
                 <textarea
-                  rows={3}
+                  rows={5}
                   value={costIntake.notes}
                   onChange={(e) =>
                     onCostIntakeChange((prev) => ({
@@ -3453,14 +4074,66 @@ function CostEstimationSection({
                       notes: e.target.value,
                     }))
                   }
-                  placeholder="Add constraints, target pricing, or hiring assumptions..."
-                  className="px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Example: 5-10 core features, dynamic website, up to 1000 users/day, basic but clean design, Next.js + Supabase, delivery within 2 months."
+                  className="px-3 py-3 rounded-xl border border-blue-200 dark:border-blue-800/60 bg-white dark:bg-gray-900 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </label>
+              <p className="text-xs text-blue-700 dark:text-blue-300 mt-2">
+                You can generate cost estimation from this brief alone. Advanced inputs below are optional.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-3 rounded-2xl border border-gray-200 dark:border-gray-700 bg-gray-50/70 dark:bg-gray-800/30 p-4">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-gray-900 dark:text-white">Advanced inputs</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    Keep the detailed controls for precise team, complexity, infra, and quality assumptions.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowAdvancedIntake((prev) => !prev)}
+                  className="inline-flex items-center justify-center rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                >
+                  {showAdvancedIntake ? 'Hide advanced inputs' : 'Show advanced inputs'}
+                  {advancedSelectionCount > 0 ? ` (${advancedSelectionCount} selected)` : ''}
+                </button>
+              </div>
+
+              {showAdvancedIntake && (
+                <div className="space-y-6 max-h-[60vh] overflow-y-auto pr-1">
+                  {COST_INTAKE_SECTIONS.map((section) => (
+                    <div key={section.id} className="p-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900/40">
+                      <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">{section.title}</h4>
+                      <div className="grid md:grid-cols-2 gap-3">
+                        {section.fields.map((field) => (
+                          <label key={field.key} className="flex flex-col gap-1">
+                            <span className="text-xs font-medium text-gray-600 dark:text-gray-300">{field.label}</span>
+                            <select
+                              value={costIntake[section.id]?.[field.key] || ''}
+                              onChange={(e) => updateField(section.id, field.key, e.target.value)}
+                              className="px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                              <option value="">Select...</option>
+                              {field.options.map((option) => (
+                                <option key={option} value={option}>{option}</option>
+                              ))}
+                            </select>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
-          <div className="flex items-center justify-end gap-3 mt-5">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mt-5">
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              No field is mandatory. If you leave everything blank, we will estimate from the current project analysis.
+            </p>
+            <div className="flex items-center justify-end gap-3">
             {hasData && (
               <button
                 onClick={onRegenerate}
@@ -3475,6 +4148,7 @@ function CostEstimationSection({
             >
               Generate Cost Estimation
             </button>
+            </div>
           </div>
         </ContentCard>
       )}
@@ -3499,7 +4173,7 @@ function CostEstimationSection({
                   <div className="p-4 bg-emerald-50 dark:bg-emerald-900/20 rounded-xl text-center">
                     <p className="text-sm text-emerald-600 mb-1">Low Budget</p>
                     <p className="text-2xl font-bold text-emerald-700 dark:text-emerald-400">
-                      ₹{((data.low_budget_version.annual_cost || 0) / 100000).toFixed(1)}L/yr
+                      â‚¹{((data.low_budget_version.annual_cost || 0) / 100000).toFixed(1)}L/yr
                     </p>
                     <p className="text-xs text-emerald-600 mt-1">{data.low_budget_version.description}</p>
                   </div>
@@ -3508,7 +4182,7 @@ function CostEstimationSection({
                   <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl text-center">
                     <p className="text-sm text-blue-600 mb-1">Startup Version</p>
                     <p className="text-2xl font-bold text-blue-700 dark:text-blue-400">
-                      ₹{((data.startup_version.annual_cost || 0) / 100000).toFixed(1)}L/yr
+                      â‚¹{((data.startup_version.annual_cost || 0) / 100000).toFixed(1)}L/yr
                     </p>
                     <p className="text-xs text-blue-600 mt-1">{data.startup_version.description}</p>
                   </div>
@@ -3517,7 +4191,7 @@ function CostEstimationSection({
                   <div className="p-4 bg-purple-50 dark:bg-purple-900/20 rounded-xl text-center">
                     <p className="text-sm text-purple-600 mb-1">Scale Version</p>
                     <p className="text-2xl font-bold text-purple-700 dark:text-purple-400">
-                      ₹{((data.scale_version.annual_cost || 0) / 100000).toFixed(1)}L/yr
+                      â‚¹{((data.scale_version.annual_cost || 0) / 100000).toFixed(1)}L/yr
                     </p>
                     <p className="text-xs text-purple-600 mt-1">{data.scale_version.description}</p>
                   </div>
@@ -3532,7 +4206,7 @@ function CostEstimationSection({
                 <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
                   <span className="text-gray-700 dark:text-gray-300">Development Cost</span>
                   <span className="font-medium text-gray-900 dark:text-white">
-                    ₹{(data.development_cost / 100000).toFixed(1)}L
+                    â‚¹{(data.development_cost / 100000).toFixed(1)}L
                   </span>
                 </div>
               )}
@@ -3540,7 +4214,7 @@ function CostEstimationSection({
                 <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
                   <span className="text-gray-700 dark:text-gray-300">Engineering Team (Annualized)</span>
                   <span className="font-medium text-gray-900 dark:text-white">
-                    ₹{(data.engineers_cost / 100000).toFixed(1)}L
+                    â‚¹{(data.engineers_cost / 100000).toFixed(1)}L
                   </span>
                 </div>
               )}
@@ -3548,7 +4222,7 @@ function CostEstimationSection({
                 <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
                   <span className="text-gray-700 dark:text-gray-300">Cloud Infrastructure</span>
                   <span className="font-medium text-gray-900 dark:text-white">
-                    ₹{(data.cloud_cost / 100000).toFixed(1)}L/yr
+                    â‚¹{(data.cloud_cost / 100000).toFixed(1)}L/yr
                   </span>
                 </div>
               )}
@@ -3556,7 +4230,7 @@ function CostEstimationSection({
                 <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
                   <span className="text-gray-700 dark:text-gray-300">AI APIs</span>
                   <span className="font-medium text-gray-900 dark:text-white">
-                    ₹{(data.ai_api_cost / 100000).toFixed(1)}L/yr
+                    â‚¹{(data.ai_api_cost / 100000).toFixed(1)}L/yr
                   </span>
                 </div>
               )}
@@ -3564,7 +4238,7 @@ function CostEstimationSection({
                 <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
                   <span className="text-gray-700 dark:text-gray-300">Tools & Services</span>
                   <span className="font-medium text-gray-900 dark:text-white">
-                    ₹{(data.tools_cost / 100000).toFixed(1)}L/yr
+                    â‚¹{(data.tools_cost / 100000).toFixed(1)}L/yr
                   </span>
                 </div>
               )}
@@ -3572,7 +4246,7 @@ function CostEstimationSection({
                 <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
                   <span className="text-gray-700 dark:text-gray-300">Operations & Maintenance</span>
                   <span className="font-medium text-gray-900 dark:text-white">
-                    ₹{(data.operational_cost / 100000).toFixed(1)}L/yr
+                    â‚¹{(data.operational_cost / 100000).toFixed(1)}L/yr
                   </span>
                 </div>
               )}
@@ -3589,7 +4263,7 @@ function CostEstimationSection({
                     <div key={key} className="p-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/40">
                       <p className="text-xs uppercase text-gray-500 mb-1">{key}</p>
                       <p className="text-sm font-semibold text-gray-900 dark:text-white">
-                        ₹{((range.min || 0) / 100000).toFixed(1)}L - ₹{((range.max || 0) / 100000).toFixed(1)}L
+                        â‚¹{((range.min || 0) / 100000).toFixed(1)}L - â‚¹{((range.max || 0) / 100000).toFixed(1)}L
                       </p>
                     </div>
                   )
@@ -3616,8 +4290,8 @@ function CostEstimationSection({
 
           <div className="p-6 bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl text-white">
             <p className="text-sm opacity-80 mb-1">Total First Year Investment</p>
-            <p className="text-4xl font-bold">₹{(totalFirstYear / 100000).toFixed(1)}L</p>
-            <p className="text-sm opacity-80 mt-2">(~₹{(totalFirstYear / 10000000).toFixed(2)} Cr)</p>
+            <p className="text-4xl font-bold">â‚¹{(totalFirstYear / 100000).toFixed(1)}L</p>
+            <p className="text-sm opacity-80 mt-2">(~â‚¹{(totalFirstYear / 10000000).toFixed(2)} Cr)</p>
           </div>
 
           {data.break_even_analysis && (
@@ -3879,112 +4553,257 @@ function AllSectionsView({
   data,
   onSectionClick,
   hasSectionContent,
+  isSectionFresh,
   loadingSections,
 }: {
   data: AnalysisResultState
   onSectionClick: (id: SectionId) => void
   hasSectionContent: (id: SectionId, result?: AnalysisResultState | null) => boolean
+  isSectionFresh: (id: SectionId, result?: AnalysisResultState | null) => boolean
   loadingSections: Partial<Record<SectionId, boolean>>
 }) {
-  const sectionSummary = (sectionId: SectionId, readyText: string, pendingText: string) =>
-    loadingSections[sectionId]
-      ? 'Generating with AI...'
-      : data.metadata?.stale_sections?.includes(sectionId)
-        ? `Stale after input update. ${pendingText}`
-        : hasSectionContent(sectionId, data)
-        ? readyText
-        : pendingText
+  type SectionCardStatus = 'generated' | 'remaining' | 'stale' | 'loading'
 
-  const colorStyles: Record<string, { bg: string; text: string }> = {
-    blue: { bg: 'bg-blue-100 dark:bg-blue-900/30', text: 'text-blue-500 dark:text-blue-300' },
-    red: { bg: 'bg-red-100 dark:bg-red-900/30', text: 'text-red-500 dark:text-red-300' },
-    purple: { bg: 'bg-purple-100 dark:bg-purple-900/30', text: 'text-purple-500 dark:text-purple-300' },
-    emerald: { bg: 'bg-emerald-100 dark:bg-emerald-900/30', text: 'text-emerald-500 dark:text-emerald-300' },
-    amber: { bg: 'bg-amber-100 dark:bg-amber-900/30', text: 'text-amber-500 dark:text-amber-300' },
-    cyan: { bg: 'bg-cyan-100 dark:bg-cyan-900/30', text: 'text-cyan-500 dark:text-cyan-300' },
+  const staleSet = new Set((data.metadata?.stale_sections || []) as SectionId[])
+
+  const getSectionStatus = (sectionId: TrackableSectionId): SectionCardStatus => {
+    if (loadingSections[sectionId]) {
+      return 'loading'
+    }
+
+    if (hasSectionContent(sectionId, data)) {
+      if (!isSectionFresh(sectionId, data) || staleSet.has(sectionId)) {
+        return 'stale'
+      }
+
+      return 'generated'
+    }
+
+    return 'remaining'
   }
 
-  const sectionSummaries = [
-    {
-      id: 'prd' as SectionId,
-      title: 'PRD Document',
-      icon: FileText,
-      summary: sectionSummary(
-        'prd',
-        data.prd?.product_overview?.vision
-          ? `${data.prd.product_overview.vision.slice(0, 100)}...`
+  const getPendingSummary = (section: SectionInfo) =>
+    `Click to generate ${section.label.toLowerCase()}`
+
+  const getReadySummary = (sectionId: TrackableSectionId) => {
+    switch (sectionId) {
+      case 'executive-dashboard':
+        return data.executive_dashboard?.innovation_score !== undefined
+          ? `Innovation score ${normalizeScoreOutOfTen(data.executive_dashboard.innovation_score, 0).toFixed(1)}/10`
+          : 'Executive overview ready'
+      case 'prd':
+        return data.prd?.product_overview?.vision
+          ? `${data.prd.product_overview.vision.slice(0, 96)}...`
           : data.prd?.vision
-            ? `${data.prd.vision.slice(0, 100)}...`
-            : 'Product requirements document ready',
-        'Click to generate the PRD'
-      ),
-      color: 'blue',
-    },
-    {
-      id: 'problem-analysis' as SectionId,
-      title: 'Problems',
-      icon: AlertTriangle,
-      summary: sectionSummary(
-        'problem-analysis',
-        `${data.problem_analysis?.length || 0} problems identified`,
-        'Click to generate problem analysis'
-      ),
-      color: 'red',
-    },
-    {
-      id: 'feature-system' as SectionId,
-      title: 'Features',
-      icon: Layers,
-      summary: sectionSummary(
-        'feature-system',
-        `${data.feature_system?.length || 0} features suggested`,
-        'Click to generate 10+ tailored features'
-      ),
-      color: 'purple',
-    },
-    {
-      id: 'development-tasks' as SectionId,
-      title: 'Tasks',
-      icon: CheckSquare,
-      summary: sectionSummary(
-        'development-tasks',
-        `${data.development_tasks?.length || 0} development tasks`,
-        'Click to generate implementation tasks'
-      ),
-      color: 'emerald',
-    },
-    {
-      id: 'cost-estimation' as SectionId,
-      title: 'Cost Estimation',
-      icon: IndianRupee,
-      summary: sectionSummary(
-        'cost-estimation',
-        `₹${(((data.cost_estimation as any)?.total_first_year || (data.cost_estimation as any)?.total_first_year_cost_inr || 0) / 100000).toFixed(1)}L first year`,
-        'Click to generate cost estimation'
-      ),
-      color: 'amber',
-    },
-    {
-      id: 'timeline' as SectionId,
-      title: 'Timeline',
-      icon: Calendar,
-      summary: sectionSummary(
-        'timeline',
-        `${data.time_estimation?.total_weeks || data.time_estimation?.mvp_timeline?.total_weeks || 12} weeks to MVP`,
-        'Click to generate delivery timeline'
-      ),
-      color: 'cyan',
-    },
-  ]
+            ? `${data.prd.vision.slice(0, 96)}...`
+            : 'Product requirements document ready'
+      case 'problem-analysis':
+        return `${data.problem_analysis?.length || 0} problems identified`
+      case 'feature-system':
+        return `${data.feature_system?.length || 0} tailored features suggested`
+      case 'gaps-opportunities': {
+        const totalSignals =
+          (data.gaps_opportunities?.market_lacks?.length || 0) +
+          (data.gaps_opportunities?.innovation_opportunities?.length || 0)
+        return totalSignals > 0
+          ? `${totalSignals} market gaps and opportunities captured`
+          : 'Market opportunities mapped'
+      }
+      case 'system-design':
+        return 'Architecture, stack, and security guidance ready'
+      case 'development-tasks':
+        return `${data.development_tasks?.length || 0} development tasks`
+      case 'execution-roadmap': {
+        const roadmap = data.execution_roadmap || {}
+        const phases = Object.values(roadmap).filter(Boolean).length
+        return phases > 0 ? `${phases} execution phases mapped` : 'Execution roadmap ready'
+      }
+      case 'manpower-planning':
+        return data.manpower_planning?.total_team_size
+          ? `${data.manpower_planning.total_team_size} people recommended`
+          : 'Team plan ready'
+      case 'resources':
+        return data.resource_requirements?.total_monthly_infrastructure_cost_inr
+          ? `â‚¹${Math.round(
+              (data.resource_requirements.total_monthly_infrastructure_cost_inr || 0) / 1000
+            )}K/month infrastructure baseline`
+          : 'Resource plan ready'
+      case 'cost-estimation':
+        return `â‚¹${(((data.cost_estimation as any)?.total_first_year || (data.cost_estimation as any)?.total_first_year_cost_inr || 0) / 100000).toFixed(1)}L first year`
+      case 'timeline':
+        return `${data.time_estimation?.total_weeks || data.time_estimation?.mvp_timeline?.total_weeks || 12} weeks to MVP`
+      case 'impact-analysis':
+        return data.impact_analysis?.time_to_value
+          ? `Time to value: ${data.impact_analysis.time_to_value}`
+          : 'Impact forecast ready'
+      default:
+        return 'Section ready'
+    }
+  }
+
+  const categoryStyles: Record<SectionInfo['category'], { bg: string; text: string }> = {
+    document: { bg: 'bg-blue-100 dark:bg-blue-900/30', text: 'text-blue-600 dark:text-blue-300' },
+    strategy: { bg: 'bg-violet-100 dark:bg-violet-900/30', text: 'text-violet-600 dark:text-violet-300' },
+    execution: { bg: 'bg-emerald-100 dark:bg-emerald-900/30', text: 'text-emerald-600 dark:text-emerald-300' },
+    planning: { bg: 'bg-amber-100 dark:bg-amber-900/30', text: 'text-amber-600 dark:text-amber-300' },
+  }
+
+  const statusStyles: Record<SectionCardStatus, string> = {
+    generated: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
+    remaining: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
+    stale: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
+    loading: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
+  }
+
+  const statusLabels: Record<SectionCardStatus, string> = {
+    generated: 'Generated',
+    remaining: 'Remaining',
+    stale: 'Needs refresh',
+    loading: 'Generating',
+  }
+
+  const sectionCards = TRACKABLE_SECTIONS.map((section) => {
+    const status = getSectionStatus(section.id)
+    const summary =
+      status === 'loading'
+        ? 'Generating with AI...'
+        : status === 'stale'
+          ? `Input changed. ${getPendingSummary(section)}`
+          : status === 'generated'
+            ? getReadySummary(section.id)
+            : getPendingSummary(section)
+
+    return {
+      ...section,
+      status,
+      summary,
+    }
+  })
+
+  const generatedCards = sectionCards.filter((section) => section.status === 'generated')
+  const remainingCards = sectionCards.filter((section) => section.status === 'remaining')
+  const refreshCards = sectionCards.filter((section) => section.status === 'stale')
+  const progressPercentage = Math.round((generatedCards.length / TRACKABLE_SECTIONS.length) * 100)
+
+  const renderSectionPills = (
+    title: string,
+    sections: typeof sectionCards,
+    emptyText: string
+  ) => (
+    <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5">
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <h3 className="text-sm font-semibold text-gray-900 dark:text-white">{title}</h3>
+        <span className="text-xs font-medium text-gray-500 dark:text-gray-400">{sections.length}</span>
+      </div>
+      {sections.length > 0 ? (
+        <div className="flex flex-wrap gap-2">
+          {sections.map((section) => (
+            <button
+              key={section.id}
+              onClick={() => onSectionClick(section.id)}
+              className="inline-flex items-center gap-2 rounded-full border border-gray-200 dark:border-gray-700 px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:border-blue-300 hover:text-blue-600 dark:hover:text-blue-300 transition-colors"
+            >
+              <section.icon className="w-4 h-4" />
+              <span>{section.label}</span>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p className="text-sm text-gray-500 dark:text-gray-400">{emptyText}</p>
+      )}
+    </div>
+  )
 
   return (
     <div className="space-y-8">
       <SectionHeader
         title="Analysis Overview"
-        subtitle="Click any section to view details"
+        subtitle="See what is already generated, what is left, and open any section on demand"
       />
 
-      {/* Executive Summary */}
+      <div className="grid xl:grid-cols-[1.4fr_1fr] gap-4">
+        <div className="rounded-3xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6">
+          <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+            <div>
+              <p className="text-sm font-semibold text-gray-900 dark:text-white">Section Progress</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                {generatedCards.length} of {TRACKABLE_SECTIONS.length} sections generated
+              </p>
+            </div>
+            <p className="text-3xl font-bold text-gray-900 dark:text-white">{progressPercentage}%</p>
+          </div>
+
+          <div className="mt-4 h-3 rounded-full bg-gray-100 dark:bg-gray-800 overflow-hidden">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-blue-500 via-cyan-500 to-emerald-500"
+              style={{ width: `${progressPercentage}%` }}
+            />
+          </div>
+
+          <div className="mt-5 grid sm:grid-cols-3 gap-3">
+            <div className="rounded-2xl bg-emerald-50 dark:bg-emerald-900/20 p-4">
+              <p className="text-xs uppercase tracking-wide text-emerald-700 dark:text-emerald-300">Generated</p>
+              <p className="mt-2 text-2xl font-bold text-emerald-700 dark:text-emerald-200">{generatedCards.length}</p>
+            </div>
+            <div className="rounded-2xl bg-slate-100 dark:bg-slate-800/80 p-4">
+              <p className="text-xs uppercase tracking-wide text-slate-700 dark:text-slate-300">Remaining</p>
+              <p className="mt-2 text-2xl font-bold text-slate-800 dark:text-white">{remainingCards.length}</p>
+            </div>
+            <div className="rounded-2xl bg-amber-50 dark:bg-amber-900/20 p-4">
+              <p className="text-xs uppercase tracking-wide text-amber-700 dark:text-amber-300">Needs Refresh</p>
+              <p className="mt-2 text-2xl font-bold text-amber-700 dark:text-amber-200">{refreshCards.length}</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-3xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6">
+          <p className="text-sm font-semibold text-gray-900 dark:text-white">Generate Next</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            Open any remaining section to generate only that output.
+          </p>
+
+          <div className="mt-4 space-y-2">
+            {(remainingCards.length > 0 ? remainingCards : refreshCards).slice(0, 5).map((section) => (
+              <button
+                key={section.id}
+                onClick={() => onSectionClick(section.id)}
+                className="w-full flex items-center justify-between gap-3 rounded-2xl border border-gray-200 dark:border-gray-700 px-4 py-3 text-left hover:border-blue-300 dark:hover:border-blue-700 transition-colors"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${categoryStyles[section.category].bg}`}>
+                    <section.icon className={`w-5 h-5 ${categoryStyles[section.category].text}`} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">{section.label}</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                      {section.status === 'stale' ? 'Refresh with the latest input' : 'Not generated yet'}
+                    </p>
+                  </div>
+                </div>
+                <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
+              </button>
+            ))}
+
+            {remainingCards.length === 0 && refreshCards.length === 0 && (
+              <div className="rounded-2xl bg-emerald-50 dark:bg-emerald-900/20 p-4">
+                <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-200">
+                  All on-demand sections are ready.
+                </p>
+                <p className="text-sm text-emerald-600 dark:text-emerald-300 mt-1">
+                  Open any section to review, refine, or export your analysis.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid lg:grid-cols-3 gap-4">
+        {renderSectionPills('Generated Sections', generatedCards, 'Generated sections will appear here.')}
+        {renderSectionPills('Remaining Sections', remainingCards, 'No remaining sections right now.')}
+        {renderSectionPills('Refresh Needed', refreshCards, 'Nothing needs refresh.')}
+      </div>
+
       {data.executive_dashboard && (
         <div className="p-6 bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl text-white">
           <h3 className="text-lg font-semibold mb-3">Executive Summary</h3>
@@ -3994,10 +4813,9 @@ function AllSectionsView({
         </div>
       )}
 
-      {/* Section Cards */}
-      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {sectionSummaries.map((section) => {
-          const style = colorStyles[section.color] || colorStyles.blue
+      <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
+        {sectionCards.map((section) => {
+          const style = categoryStyles[section.category]
           return (
             <motion.button
               key={section.id}
@@ -4009,15 +4827,27 @@ function AllSectionsView({
                 hover:border-gray-300 dark:hover:border-gray-700
                 text-left transition-all group"
             >
-              <div className={`w-12 h-12 rounded-xl mb-4 flex items-center justify-center ${style.bg}`}>
-                <section.icon className={`w-6 h-6 ${style.text}`} />
+              <div className="flex items-start justify-between gap-3 mb-4">
+                <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${style.bg}`}>
+                  <section.icon className={`w-6 h-6 ${style.text}`} />
+                </div>
+                <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${statusStyles[section.status]}`}>
+                  {statusLabels[section.status]}
+                </span>
               </div>
               <h4 className="font-semibold text-gray-900 dark:text-white mb-2
                 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
-                {section.title}
+                {section.label}
               </h4>
               <p className="text-sm text-gray-500 dark:text-gray-400">
                 {section.summary}
+              </p>
+              <p className="text-xs font-medium text-blue-600 dark:text-blue-400 mt-4">
+                {section.status === 'generated'
+                  ? 'Open section'
+                  : section.status === 'stale'
+                    ? 'Refresh section'
+                    : 'Generate section'}
               </p>
             </motion.button>
           )
@@ -4169,3 +4999,6 @@ function EmptySection({ name }: { name: string }) {
     </div>
   )
 }
+
+
+

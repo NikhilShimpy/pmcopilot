@@ -1093,6 +1093,126 @@ function scoreFromSelection(
   return fallback;
 }
 
+function inferQuickCostSignals(notes: string | undefined) {
+  const normalized = normalizeWhitespace(notes || '').toLowerCase();
+  if (!normalized) {
+    return {};
+  }
+
+  const teamSizeMatch =
+    normalized.match(/\bteam(?:\s+size)?\s*(?:of|=|:)?\s*(\d+)\b/) ||
+    normalized.match(/\b(\d+)\s+(?:people|members|developers|engineers)\b/);
+  const teamSize = teamSizeMatch ? Number(teamSizeMatch[1]) : null;
+
+  let teamMode: string | undefined;
+  if (
+    selectionIncludes(normalized, ['solo', 'single founder', 'single-person']) ||
+    teamSize === 1
+  ) {
+    teamMode = 'solo/lean';
+  } else if (
+    selectionIncludes(normalized, ['small team', 'lean team']) ||
+    (teamSize !== null && teamSize >= 2 && teamSize <= 4)
+  ) {
+    teamMode = 'small team';
+  } else if (
+    selectionIncludes(normalized, ['cross-functional', 'full team']) ||
+    (teamSize !== null && teamSize >= 5)
+  ) {
+    teamMode = 'full cross-functional team';
+  }
+
+  let deliverySpeed: string | undefined;
+  if (
+    selectionIncludes(normalized, [
+      'next month',
+      'within 1 month',
+      '1 month',
+      '4 weeks',
+      '2 weeks',
+      '3 weeks',
+      'urgent',
+    ])
+  ) {
+    deliverySpeed = 'aggressive';
+  } else if (
+    selectionIncludes(normalized, [
+      '2 months',
+      '3 months',
+      '6 weeks',
+      '8 weeks',
+      '10 weeks',
+      '12 weeks',
+    ])
+  ) {
+    deliverySpeed = 'balanced';
+  } else if (
+    selectionIncludes(normalized, ['4 months', '5 months', '6 months', 'quarter', 'steady'])
+  ) {
+    deliverySpeed = 'steady';
+  }
+
+  const hostingScale = selectionIncludes(normalized, ['100k', '100000', '50k', '50000', 'enterprise'])
+    ? 'scale-ready'
+    : selectionIncludes(normalized, ['10k', '10000', '5k', '5000', 'dynamic website', 'web app', 'saas'])
+    ? 'growth'
+    : selectionIncludes(normalized, ['static website', 'landing page', 'mvp'])
+    ? 'mvp'
+    : undefined;
+
+  const concurrentUsers = selectionIncludes(normalized, ['100k', '100000', '50k', '50000'])
+    ? 'high'
+    : selectionIncludes(normalized, ['10k', '10000', '5k', '5000', '1k', '1000'])
+    ? 'medium'
+    : selectionIncludes(normalized, ['100', '250', '500'])
+    ? 'low'
+    : undefined;
+
+  const aiUsage = selectionIncludes(normalized, ['agent', 'ai assistant', 'chatbot', 'gpt', 'gemini'])
+    ? 'advanced AI'
+    : selectionIncludes(normalized, ['ai', 'recommendation', 'search', 'summar'])
+    ? 'basic AI'
+    : undefined;
+
+  const realtimeRequirement = selectionIncludes(normalized, ['real-time', 'realtime', 'live chat', 'live updates', 'socket'])
+    ? 'core realtime'
+    : selectionIncludes(normalized, ['dynamic website', 'interactive'])
+    ? 'some realtime'
+    : selectionIncludes(normalized, ['static website'])
+    ? 'none'
+    : undefined;
+
+  const seniority = selectionIncludes(normalized, ['senior', 'expert', 'experienced'])
+    ? 'senior-heavy'
+    : selectionIncludes(normalized, ['junior', 'budget team'])
+    ? 'junior-heavy'
+    : undefined;
+
+  const maintenanceLevel = selectionIncludes(normalized, ['24x7', 'premium support', 'high support'])
+    ? '24x7'
+    : selectionIncludes(normalized, ['basic support', 'minimal support'])
+    ? 'basic'
+    : undefined;
+
+  const designQuality = selectionIncludes(normalized, ['premium design', 'high-end', 'polished'])
+    ? 'premium'
+    : selectionIncludes(normalized, ['basic', 'structured', 'clean', 'minimal'])
+    ? 'standard'
+    : undefined;
+
+  return {
+    teamMode,
+    deliverySpeed,
+    hostingScale,
+    concurrentUsers,
+    aiUsage,
+    realtimeRequirement,
+    seniority,
+    maintenanceLevel,
+    designQuality,
+  };
+}
+
 function getRoleMonthlyCost(role: string, seniority: string | undefined): number {
   const normalizedRole = role.toLowerCase();
   const normalizedSeniority = (seniority || 'mid').toLowerCase();
@@ -1132,6 +1252,7 @@ function estimateCostModel(
   context?: GenerationContext
 ) {
   const intake = getCostIntakeFromMetadata(existingResult);
+  const quickSignals = inferQuickCostSignals(intake?.notes);
   const features = Array.isArray(existingResult.feature_system)
     ? existingResult.feature_system
     : [];
@@ -1147,7 +1268,8 @@ function estimateCostModel(
   const taskScopeFactor = Math.max(0, tasks.length - 14) * 0.01;
   const complexitySignal =
     scoreFromSelection(
-      intake?.technical_complexity?.backend_complexity,
+      intake?.technical_complexity?.backend_complexity ||
+        quickSignals.hostingScale,
       [
         { keywords: ['high', 'complex'], score: 1.24 },
         { keywords: ['medium'], score: 1.08 },
@@ -1174,12 +1296,18 @@ function estimateCostModel(
       1
     );
 
-  const teamMode = intake?.development_factors?.team_mode || 'small team';
-  const seniority = intake?.development_factors?.seniority || 'mid';
-  const deliverySpeed = intake?.development_factors?.delivery_speed || 'balanced';
-  const hostingScale = intake?.infrastructure_hosting?.hosting_scale || 'mvp';
-  const aiUsage = intake?.integrations_apis?.ai_apis || intake?.feature_complexity?.ai_features;
-  const maintenanceLevel = intake?.maintenance_scaling?.support_level || 'standard';
+  const teamMode = intake?.development_factors?.team_mode || quickSignals.teamMode || 'small team';
+  const seniority = intake?.development_factors?.seniority || quickSignals.seniority || 'mid';
+  const deliverySpeed =
+    intake?.development_factors?.delivery_speed || quickSignals.deliverySpeed || 'balanced';
+  const hostingScale =
+    intake?.infrastructure_hosting?.hosting_scale || quickSignals.hostingScale || 'mvp';
+  const aiUsage =
+    intake?.integrations_apis?.ai_apis ||
+    intake?.feature_complexity?.ai_features ||
+    quickSignals.aiUsage;
+  const maintenanceLevel =
+    intake?.maintenance_scaling?.support_level || quickSignals.maintenanceLevel || 'standard';
 
   const baseTeamMonthly = scoreFromSelection(
     teamMode,
@@ -1231,7 +1359,7 @@ function estimateCostModel(
   );
 
   const concurrencyMultiplier = scoreFromSelection(
-    intake?.user_scale?.concurrent_users,
+    intake?.user_scale?.concurrent_users || quickSignals.concurrentUsers,
     [
       { keywords: ['low', '<1k', 'under 1k'], score: 0.92 },
       { keywords: ['1k', '5k', 'medium'], score: 1.05 },
@@ -1242,7 +1370,8 @@ function estimateCostModel(
 
   const realtimeMultiplier = scoreFromSelection(
     intake?.performance_requirements?.realtime_response ||
-      intake?.feature_complexity?.realtime_features,
+      intake?.feature_complexity?.realtime_features ||
+      quickSignals.realtimeRequirement,
     [
       { keywords: ['strict', 'high', 'realtime', 'sub-second'], score: 1.28 },
       { keywords: ['moderate'], score: 1.1 },

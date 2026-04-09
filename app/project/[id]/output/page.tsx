@@ -74,6 +74,7 @@ export default async function OutputPage({ params, searchParams }: OutputPagePro
   let initialAnalysis: any = null
   let initialAnalysisId: string | null = null
   let initialAnalysisSessionId: string | null = null
+  let initialLegacyAnalysisId: string | null = null
 
   if (!shouldGenerate) {
     const { data: sessions, error: sessionsError } = await supabase
@@ -120,6 +121,7 @@ export default async function OutputPage({ params, searchParams }: OutputPagePro
         initialAnalysis = withSessionMetadata(sessionResult, selectedSession)
         initialAnalysisId = selectedSession.id
         initialAnalysisSessionId = selectedSession.id
+        initialLegacyAnalysisId = selectedSession.legacy_analysis_id || null
       }
     }
 
@@ -145,6 +147,7 @@ export default async function OutputPage({ params, searchParams }: OutputPagePro
           },
         }
         initialAnalysisId = selectedAnalysis.id
+        initialLegacyAnalysisId = selectedAnalysis.id
       }
     }
 
@@ -171,6 +174,7 @@ export default async function OutputPage({ params, searchParams }: OutputPagePro
           },
         }
         initialAnalysisId = latestAnalysis.id
+        initialLegacyAnalysisId = latestAnalysis.id
       }
     }
   }
@@ -185,6 +189,7 @@ export default async function OutputPage({ params, searchParams }: OutputPagePro
       initialAnalysis={initialAnalysis}
       initialAnalysisId={initialAnalysisId}
       initialAnalysisSessionId={initialAnalysisSessionId}
+      initialLegacyAnalysisId={initialLegacyAnalysisId}
     />
   )
 }
