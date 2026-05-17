@@ -5,7 +5,7 @@
 
 > **Production-Grade SaaS Foundation** - AI-powered feedback analysis and product insights platform
 
-🌐 **Live Demo:** [https://pmcopilot-rho.vercel.app/](https://pmcopilot-rho.vercel.app/)
+🌐 **Live Demo:** 
 
 ## 🎯 Overview
 
