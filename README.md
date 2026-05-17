@@ -5,8 +5,6 @@
 
 > **Production-Grade SaaS Foundation** - AI-powered feedback analysis and product insights platform
 
-🌐 **Live Demo:** 
-
 ## 🎯 Overview
 
 PMCopilot is a comprehensive SaaS platform designed to help Product Managers analyze user feedback using AI. This is the complete foundational architecture built with scalability, modularity, and production-readiness in mind.
