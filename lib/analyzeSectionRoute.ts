@@ -21,7 +21,7 @@ import {
 } from '@/lib/analysisSessionStore';
 
 type DeferredRouteSection = (typeof DEFERRED_STRATEGY_SECTIONS)[number];
-
+// this check valid section 
 const VALID_SECTIONS: StrategySectionId[] = [
   'overview',
   'executive-dashboard',
