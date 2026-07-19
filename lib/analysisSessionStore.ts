@@ -69,7 +69,7 @@ export const REQUIRED_ANALYSIS_SECTIONS: StrategySectionId[] = [
   'timeline',
   'impact-analysis',
 ]
-
+// this export all analysis
 export const ALL_ANALYSIS_SECTIONS: StrategySectionId[] = [
   'overview',
   ...REQUIRED_ANALYSIS_SECTIONS,
