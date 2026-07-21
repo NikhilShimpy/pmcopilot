@@ -16,7 +16,19 @@ import { logger } from './logger'
 // ============================================
 // INPUT ANALYSIS HELPERS
 // ============================================
-
+interface ExtractedContext {
+  productType: string;
+  targetUsers: string;
+  primaryFeatures: string[];
+  industry: string;
+  keywords: string[];
+  isApp: boolean;
+  isSaaS: boolean;
+  isB2B: boolean;
+  isB2C: boolean;
+  hasAI: boolean;
+  hasMobile: boolean;
+}
 
 
 function extractContextFromInput(feedback: string): ExtractedContext {
