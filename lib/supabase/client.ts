@@ -5,10 +5,30 @@ import { createBrowserClient } from '@supabase/ssr'
  * Automatically handles session management
  */
 export function createClientSupabaseClient() {
-  return createBrowserClient(
+  if (typeof window !== 'undefined' && clientInstance) {
+    return clientInstance
+  }
+
+  const client = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      global: {
+        // Prevent long hangs when Supabase host is unreachable.
+        fetch: (input, init) =>
+          fetch(input, {
+            ...init,
+            signal: init?.signal ?? AbortSignal.timeout(5000),
+          }),
+      },
+    }
   )
+
+  if (typeof window !== 'undefined') {
+    clientInstance = client
+  }
+
+  return client
 }
 
 /**

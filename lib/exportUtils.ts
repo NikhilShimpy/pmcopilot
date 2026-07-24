@@ -3,7 +3,7 @@
  * Export analysis results in various formats (PDF, Markdown, JSON, CSV)
  */
 
-import { ComprehensiveAnalysisResult } from '@/types/analysis'
+type ComprehensiveAnalysisResult = import('@/types/analysis').ComprehensiveAnalysisResult
 
 /**
  * Export analysis as Markdown
