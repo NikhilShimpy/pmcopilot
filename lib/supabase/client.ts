@@ -15,7 +15,7 @@ export function createClientSupabaseClient() {
     {
       global: {
         // Prevent long hangs when Supabase host is unreachable.
-        fetch: (input, init) =>
+        fetch: (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) =>
           fetch(input, {
             ...init,
             signal: init?.signal ?? AbortSignal.timeout(5000),
